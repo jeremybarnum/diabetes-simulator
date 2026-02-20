@@ -1,0 +1,43 @@
+{
+  "name": "Insulin Bolus",
+  "description": "Correction bolus for high BG - tests insulin effect calculation",
+  "glucoseSamples": [
+    {
+      "timestamp": 1739410800.0,
+      "value": 180.0
+    },
+    {
+      "timestamp": 1739411100.0,
+      "value": 178.0
+    },
+    {
+      "timestamp": 1739411400.0,
+      "value": 175.0
+    },
+    {
+      "timestamp": 1739411700.0,
+      "value": 170.0
+    },
+    {
+      "timestamp": 1739412000.0,
+      "value": 165.0
+    }
+  ],
+  "carbEntries": [],
+  "insulinDoses": [
+    {
+      "timestamp": 1739410800.0,
+      "units": 2.0
+    }
+  ],
+  "settings": {
+    "insulin_sensitivity_factor": 50.0,
+    "carb_ratio": 10.0,
+    "basal_rate": 1.0,
+    "duration_of_insulin_action": 6.0,
+    "target_range": [100, 120],
+    "enable_momentum": true,
+    "enable_irc": true,
+    "enable_dca": true
+  }
+}

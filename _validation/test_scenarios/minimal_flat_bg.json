@@ -1,0 +1,20 @@
+{
+  "name": "Minimal Flat BG",
+  "description": "3 flat BG readings at 120 mg/dL, no insulin or carbs",
+  "glucoseSamples": [
+    {
+      "timestamp": 1770960269.313515,
+      "value": 120.0
+    },
+    {
+      "timestamp": 1770960569.313515,
+      "value": 120.0
+    },
+    {
+      "timestamp": 1770960809.313515,
+      "value": 120.0
+    }
+  ],
+  "carbEntries": [],
+  "insulinDoses": []
+}

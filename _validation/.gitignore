@@ -1,0 +1,5 @@
+# Large test artifacts — not needed to run the simulator
+ios_logs/
+validation_results/
+tests/
+irc_tests/

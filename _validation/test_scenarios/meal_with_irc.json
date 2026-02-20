@@ -1,0 +1,53 @@
+{
+  "name": "Meal With IRC",
+  "description": "Meal bolus with IRC correction - tests integrated retrospective correction",
+  "glucoseSamples": [
+    {
+      "timestamp": 1739410800.0,
+      "value": 120.0
+    },
+    {
+      "timestamp": 1739411100.0,
+      "value": 125.0
+    },
+    {
+      "timestamp": 1739411400.0,
+      "value": 135.0
+    },
+    {
+      "timestamp": 1739411700.0,
+      "value": 150.0
+    },
+    {
+      "timestamp": 1739412000.0,
+      "value": 165.0
+    },
+    {
+      "timestamp": 1739412300.0,
+      "value": 175.0
+    }
+  ],
+  "carbEntries": [
+    {
+      "timestamp": 1739410800.0,
+      "grams": 40.0,
+      "absorptionHours": 3.0
+    }
+  ],
+  "insulinDoses": [
+    {
+      "timestamp": 1739410800.0,
+      "units": 4.0
+    }
+  ],
+  "settings": {
+    "insulin_sensitivity_factor": 50.0,
+    "carb_ratio": 10.0,
+    "basal_rate": 1.0,
+    "duration_of_insulin_action": 6.0,
+    "target_range": [100, 120],
+    "enable_momentum": true,
+    "enable_irc": true,
+    "enable_dca": true
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "Single BG Reading",
+  "description": "Just one BG reading at 120 mg/dL",
+  "glucoseSamples": [
+    {
+      "timestamp": 1770961179.470484,
+      "value": 120.0
+    }
+  ],
+  "carbEntries": [],
+  "insulinDoses": []
+}

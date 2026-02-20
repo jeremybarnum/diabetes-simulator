@@ -1,0 +1,272 @@
+{
+  "01_slight_rise": {
+    "cob": 0,
+    "duration": 30,
+    "eventualBG": 130,
+    "iob": 0,
+    "predBGs": {
+      "IOB": {
+        "count": 13,
+        "first": 121,
+        "last": 124
+      },
+      "UAM": {
+        "count": 31,
+        "first": 121,
+        "last": 130
+      },
+      "ZT": {
+        "count": 48,
+        "first": 121,
+        "last": 121
+      }
+    },
+    "rate": 0.95,
+    "reason_prefix": "Autosens ratio: 1, ISF: 100\u2192100, COB: 0, Dev: 3, BGI: 0, CR: 10, Target: 100, mi",
+    "units": 0.1
+  },
+  "02_high_bg_with_iob": {
+    "cob": 0,
+    "duration": 60,
+    "eventualBG": 115,
+    "iob": 1.361,
+    "predBGs": {
+      "IOB": {
+        "count": 45,
+        "first": 148,
+        "last": 43
+      },
+      "UAM": {
+        "count": 45,
+        "first": 148,
+        "last": 115
+      },
+      "ZT": {
+        "count": 47,
+        "first": 148,
+        "last": 99
+      }
+    },
+    "rate": 0,
+    "reason_prefix": "Autosens ratio: 1, ISF: 100\u2192100, COB: 0, Dev: 36, BGI: -7, CR: 10, Target: 100, ",
+    "units": null
+  },
+  "03_rising_bg_no_cause": {
+    "cob": 0,
+    "duration": 30,
+    "eventualBG": 223,
+    "iob": 0,
+    "predBGs": {
+      "IOB": {
+        "count": 13,
+        "first": 130,
+        "last": 159
+      },
+      "UAM": {
+        "count": 35,
+        "first": 130,
+        "last": 223
+      },
+      "ZT": {
+        "count": 48,
+        "first": 130,
+        "last": 130
+      }
+    },
+    "rate": 1.35,
+    "reason_prefix": "Autosens ratio: 1, ISF: 100\u2192100, COB: 0, Dev: 32, BGI: 0, CR: 10, Target: 100, m",
+    "units": 0.2
+  },
+  "04_rising_with_cob": {
+    "cob": 27,
+    "duration": 30,
+    "eventualBG": 377,
+    "iob": 0,
+    "predBGs": {
+      "COB": {
+        "count": 48,
+        "first": 115,
+        "last": 377
+      },
+      "IOB": {
+        "count": 13,
+        "first": 115,
+        "last": 127
+      },
+      "UAM": {
+        "count": 13,
+        "first": 115,
+        "last": 121
+      },
+      "ZT": {
+        "count": 48,
+        "first": 115,
+        "last": 115
+      }
+    },
+    "rate": 1.35,
+    "reason_prefix": "Autosens ratio: 1, ISF: 100\u2192100, COB: 27, Dev: 13, BGI: 0, CR: 10, Target: 100, ",
+    "units": 0.2
+  },
+  "05_meal_bolus": {
+    "cob": 24,
+    "duration": 30,
+    "eventualBG": 103,
+    "iob": 2.666,
+    "predBGs": {
+      "COB": {
+        "count": 48,
+        "first": 135,
+        "last": 103
+      },
+      "IOB": {
+        "count": 18,
+        "first": 135,
+        "last": 39
+      },
+      "UAM": {
+        "count": 20,
+        "first": 135,
+        "last": 39
+      },
+      "ZT": {
+        "count": 48,
+        "first": 135,
+        "last": 39
+      }
+    },
+    "rate": 0,
+    "reason_prefix": "Autosens ratio: 1, ISF: 100\u2192100, COB: 24, Dev: 69, BGI: -9, CR: 10, Target: 100,",
+    "units": null
+  },
+  "06_high_bg_correction": {
+    "cob": 0,
+    "duration": 30,
+    "eventualBG": 230,
+    "iob": 0,
+    "predBGs": {
+      "IOB": {
+        "count": 13,
+        "first": 221,
+        "last": 224
+      },
+      "UAM": {
+        "count": 31,
+        "first": 221,
+        "last": 230
+      },
+      "ZT": {
+        "count": 48,
+        "first": 221,
+        "last": 221
+      }
+    },
+    "rate": 1.35,
+    "reason_prefix": "Autosens ratio: 1, ISF: 100\u2192100, COB: 0, Dev: 3, BGI: 0, CR: 10, Target: 100, mi",
+    "units": 0.2
+  },
+  "07_going_low": {
+    "cob": 0,
+    "duration": 60,
+    "eventualBG": 52,
+    "iob": 0,
+    "predBGs": {
+      "IOB": {
+        "count": 13,
+        "first": 75,
+        "last": 56
+      },
+      "ZT": {
+        "count": 48,
+        "first": 75,
+        "last": 75
+      }
+    },
+    "rate": 0,
+    "reason_prefix": "Autosens ratio: 1, ISF: 100\u2192100, COB: 0, Dev: -23, BGI: 0, CR: 10, Target: 100, ",
+    "units": null
+  },
+  "08_multiple_carbs": {
+    "cob": 49,
+    "duration": 30,
+    "eventualBG": 612,
+    "iob": 0,
+    "predBGs": {
+      "COB": {
+        "count": 45,
+        "first": 125,
+        "last": 612
+      },
+      "IOB": {
+        "count": 13,
+        "first": 125,
+        "last": 154
+      },
+      "UAM": {
+        "count": 13,
+        "first": 125,
+        "last": 125
+      },
+      "ZT": {
+        "count": 48,
+        "first": 125,
+        "last": 125
+      }
+    },
+    "rate": 1.35,
+    "reason_prefix": "Autosens ratio: 1, ISF: 100\u2192100, COB: 49, Dev: 32, BGI: 0, CR: 10, Target: 100, ",
+    "units": 0.2
+  },
+  "09_correction_in_progress": {
+    "cob": 0,
+    "duration": 60,
+    "eventualBG": 57,
+    "iob": 2.364,
+    "predBGs": {
+      "IOB": {
+        "count": 30,
+        "first": 204,
+        "last": 39
+      },
+      "UAM": {
+        "count": 47,
+        "first": 204,
+        "last": 57
+      },
+      "ZT": {
+        "count": 48,
+        "first": 204,
+        "last": 58
+      }
+    },
+    "rate": 0,
+    "reason_prefix": "Autosens ratio: 1, ISF: 100\u2192100, COB: 0, Dev: 50, BGI: -11, CR: 10, Target: 100,",
+    "units": null
+  },
+  "10_uam_detection": {
+    "cob": 0,
+    "duration": 30,
+    "eventualBG": 200,
+    "iob": 0,
+    "predBGs": {
+      "IOB": {
+        "count": 13,
+        "first": 160,
+        "last": 197
+      },
+      "UAM": {
+        "count": 13,
+        "first": 160,
+        "last": 167
+      },
+      "ZT": {
+        "count": 48,
+        "first": 160,
+        "last": 160
+      }
+    },
+    "rate": 1.35,
+    "reason_prefix": "Autosens ratio: 1, ISF: 100\u2192100, COB: 0, Dev: 40, BGI: 0, CR: 10, Target: 100, m",
+    "units": 0.2
+  }
+}

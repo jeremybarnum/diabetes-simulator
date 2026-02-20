@@ -1,0 +1,20 @@
+{
+  "name": "3 BG Readings",
+  "description": "Three flat BG readings at 120 mg/dL",
+  "glucoseSamples": [
+    {
+      "timestamp": 1770960721.7178528,
+      "value": 120.0
+    },
+    {
+      "timestamp": 1770961021.7178528,
+      "value": 120.0
+    },
+    {
+      "timestamp": 1770961261.7178528,
+      "value": 120.0
+    }
+  ],
+  "carbEntries": [],
+  "insulinDoses": []
+}

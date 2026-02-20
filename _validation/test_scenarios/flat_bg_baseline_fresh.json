@@ -1,0 +1,41 @@
+{
+  "name": "Flat BG Baseline - Fresh",
+  "description": "Flat stable BG with current timestamps",
+  "glucoseSamples": [
+    {
+      "timestamp": 1770959139.329637,
+      "value": 110.0
+    },
+    {
+      "timestamp": 1770959439.329637,
+      "value": 110.0
+    },
+    {
+      "timestamp": 1770959739.329637,
+      "value": 111.0
+    },
+    {
+      "timestamp": 1770960039.329637,
+      "value": 110.0
+    },
+    {
+      "timestamp": 1770960279.329637,
+      "value": 110.0
+    }
+  ],
+  "carbEntries": [],
+  "insulinDoses": [],
+  "settings": {
+    "insulin_sensitivity_factor": 50.0,
+    "carb_ratio": 10.0,
+    "basal_rate": 1.0,
+    "duration_of_insulin_action": 6.0,
+    "target_range": [
+      100,
+      120
+    ],
+    "enable_momentum": true,
+    "enable_irc": true,
+    "enable_dca": true
+  }
+}

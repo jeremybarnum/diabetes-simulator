@@ -1,0 +1,30 @@
+{
+  "name": "Rising BG - 1 mg/dL per minute with 0.1U insulin",
+  "description": "4 BG readings: 100→105→110→115, exactly 1 mg/dL/min, plus 0.1U insulin at T=0",
+  "glucoseSamples": [
+    {
+      "timestamp": 1770963000.0,
+      "value": 100.0
+    },
+    {
+      "timestamp": 1770963300.0,
+      "value": 105.0
+    },
+    {
+      "timestamp": 1770963600.0,
+      "value": 110.0
+    },
+    {
+      "timestamp": 1770963840.0,
+      "value": 115.0
+    }
+  ],
+  "carbEntries": [],
+  "insulinDoses": [
+    {
+      "timestamp": 1770963000.0,
+      "units": 0.1,
+      "type": "bolus"
+    }
+  ]
+}

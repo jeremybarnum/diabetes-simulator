@@ -1,0 +1,24 @@
+{
+  "name": "Rising BG - Exact 1 mg/dL per minute",
+  "description": "4 BG readings: 100\u2192105\u2192110\u2192115, exactly 1 mg/dL/min",
+  "glucoseSamples": [
+    {
+      "timestamp": 1770960677.9686668,
+      "value": 100.0
+    },
+    {
+      "timestamp": 1770960977.9686668,
+      "value": 105.0
+    },
+    {
+      "timestamp": 1770961277.9686668,
+      "value": 110.0
+    },
+    {
+      "timestamp": 1770961517.9686668,
+      "value": 115.0
+    }
+  ],
+  "carbEntries": [],
+  "insulinDoses": []
+}

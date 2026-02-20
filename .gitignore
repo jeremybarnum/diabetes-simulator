@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+venv/
+
+# Build artifacts and iOS testing
+loop_ios_testing/
+loop_ios_testing_v2/
+loop_testing/
+trio_testing/
+
+# Generated output
+sim_results/
+outputs/
+*.png
+
+# Dev archive and internal notes
+_dev/
+docs/
+
+# External dependencies
+Trio/
+node_modules/
+
+# System / IDE
+.DS_Store
+.claude/
+.vscode/
+.idea/
+*.swp
+
+# Testing artifacts
+.pytest_cache/
+.coverage

@@ -1,0 +1,25 @@
+{
+  "name": "Single BG Reading",
+  "description": "Just one BG reading at 120 mg/dL, no insulin or carbs",
+  "glucoseSamples": [
+    {
+      "timestamp": 1770960806.870854,
+      "value": 120.0
+    }
+  ],
+  "carbEntries": [],
+  "insulinDoses": [],
+  "settings": {
+    "insulin_sensitivity_factor": 50.0,
+    "carb_ratio": 10.0,
+    "basal_rate": 1.0,
+    "duration_of_insulin_action": 6.0,
+    "target_range": [
+      100,
+      120
+    ],
+    "enable_momentum": true,
+    "enable_irc": true,
+    "enable_dca": true
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "name": "Rising BG - Momentum Test",
+  "description": "BG rising steadily to test momentum effect calculation",
+  "glucoseSamples": [
+    {
+      "timestamp": 1739410800.0,
+      "value": 100.0
+    },
+    {
+      "timestamp": 1739411100.0,
+      "value": 105.0
+    },
+    {
+      "timestamp": 1739411400.0,
+      "value": 110.0
+    },
+    {
+      "timestamp": 1739411700.0,
+      "value": 115.0
+    },
+    {
+      "timestamp": 1739412000.0,
+      "value": 120.0
+    }
+  ],
+  "carbEntries": [],
+  "insulinDoses": [],
+  "settings": {
+    "insulin_sensitivity_factor": 50.0,
+    "carb_ratio": 10.0,
+    "basal_rate": 1.0,
+    "duration_of_insulin_action": 6.0,
+    "target_range": [100, 120],
+    "enable_momentum": true,
+    "enable_irc": true,
+    "enable_dca": true
+  }
+}
