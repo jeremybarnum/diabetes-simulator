@@ -961,6 +961,6 @@ exact same patient on each path.
 
 ---
 
-*For a detailed technical description of the algorithms and patient model, see
-[docs/technical_guide.md](docs/technical_guide.md).*
+*For a detailed technical description of the algorithms and patient model, see the
+[Technical Guide](https://github.com/jeremybarnum/diabetes-simulator/blob/main/docs/technical_guide.md) on GitHub.*
 """)
