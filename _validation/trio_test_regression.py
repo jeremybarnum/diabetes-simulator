@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Dict, List, Set
 
 sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from trio_batch_validate import (
     define_trio_test_scenarios, REFERENCE_TIME, load_settings,

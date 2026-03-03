@@ -20,6 +20,7 @@ from typing import Dict, List, Tuple, Optional, Any
 from datetime import datetime, timezone
 
 sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from trio_runner import TrioRunner, TrioComparison
 from trio_json_exporter import TrioJSONExporter
@@ -35,7 +36,7 @@ REFERENCE_TIME = 1739622600.0  # 2025-02-15T12:30:00Z
 
 def load_settings() -> Dict:
     """Load settings from settings.json."""
-    settings_path = Path(__file__).parent / "settings.json"
+    settings_path = Path(__file__).parent.parent / "settings.json"
     with open(settings_path) as f:
         return json.load(f)
 

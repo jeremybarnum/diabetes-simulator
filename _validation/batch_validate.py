@@ -24,6 +24,7 @@ from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 
 sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 SIMULATOR_ID = "4A0939FF-02C0-4000-843E-EEAE8BC727CC"
 HEALTHKIT_BUNDLE = "com.test.healthkitinjector"
@@ -223,7 +224,7 @@ def run_ios_loop(scenario: Dict, scenario_name: str, keep_alive: bool = False) -
 
 def load_settings() -> Dict:
     """Load therapy settings from settings.json (single source of truth)."""
-    settings_file = Path(__file__).parent / "settings.json"
+    settings_file = Path(__file__).parent.parent / "settings.json"
     with open(settings_file) as f:
         raw = json.load(f)
     # Convert settings.json format to algorithm format
