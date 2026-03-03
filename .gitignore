@@ -17,6 +17,8 @@ outputs/
 
 # Dev archive and internal notes
 _dev/
+docs/*
+!docs/technical_guide.md
 
 # External dependencies
 Trio/
