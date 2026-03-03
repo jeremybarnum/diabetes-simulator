@@ -49,6 +49,45 @@ def _clock_to_minutes(clock_str: str) -> int:
     return total - 7 * 60
 
 
+def save_profile_to_json(file_path: str):
+    """Save the current session state to a patient profile JSON file."""
+    profile = build_profile_from_state()
+    data = {
+        "meals": [
+            {"time_of_day_minutes": m.time_of_day_minutes,
+             "carbs_mean": m.carbs_mean, "carbs_sd": m.carbs_sd,
+             "absorption_hrs": m.absorption_hrs}
+            for m in profile.meals
+        ],
+        "undeclared_meals": [
+            {"time_of_day_minutes": m.time_of_day_minutes,
+             "carbs_mean": m.carbs_mean, "carbs_sd": m.carbs_sd,
+             "absorption_hrs": m.absorption_hrs}
+            for m in profile.undeclared_meals
+        ],
+        "carb_count_sigma": profile.carb_count_sigma,
+        "carb_count_bias": profile.carb_count_bias,
+        "absorption_sigma": profile.absorption_sigma,
+        "undeclared_meal_prob": profile.undeclared_meal_prob,
+        "sensitivity_sigma": profile.sensitivity_sigma,
+        "exercises_per_week": profile.exercises_per_week,
+        "starting_bg": profile.starting_bg,
+    }
+    if profile.exercise_spec:
+        ex = profile.exercise_spec
+        data["exercise_spec"] = {
+            "time_of_day_minutes": ex.time_of_day_minutes,
+            "declared_scalar": ex.declared_scalar,
+            "declared_duration_hrs": ex.declared_duration_hrs,
+            "actual_scalar_mean": ex.actual_scalar_mean,
+            "actual_scalar_sigma": ex.actual_scalar_sigma,
+            "actual_duration_hrs_mean": ex.actual_duration_hrs_mean,
+            "actual_duration_hrs_sigma": ex.actual_duration_hrs_sigma,
+        }
+    with open(file_path, 'w') as f:
+        json.dump(data, f, indent=4)
+
+
 def load_profile_to_state(profile_path: str):
     """Load a patient profile JSON and populate session state.
 
@@ -136,9 +175,7 @@ def build_profile_from_state() -> PatientProfile:
     """Construct a PatientProfile from current session state (widget keys)."""
     # Parse meals from data_editor results
     meals = []
-    meals_df = st.session_state.get("meals_editor")
-    if meals_df is None:
-        meals_df = st.session_state.get("meals_df")
+    meals_df = st.session_state.get("meals_df")
     if meals_df is not None and len(meals_df) > 0:
         for _, row in meals_df.iterrows():
             try:
@@ -153,9 +190,7 @@ def build_profile_from_state() -> PatientProfile:
                 continue
 
     undeclared_meals = []
-    und_df = st.session_state.get("undeclared_meals_editor")
-    if und_df is None:
-        und_df = st.session_state.get("undeclared_meals_df")
+    und_df = st.session_state.get("undeclared_meals_df")
     if und_df is not None and len(und_df) > 0:
         for _, row in und_df.iterrows():
             try:
@@ -219,12 +254,13 @@ def build_profile_from_state() -> PatientProfile:
 
 st.sidebar.header("Simulation Settings")
 
-# Profile picker
+# Profile loader
 selected_profile_name = st.sidebar.selectbox(
-    "Patient Profile (preset)",
+    "Load Profile",
     list(profile_names.keys()),
     index=list(profile_names.keys()).index("Real Patient")
     if "Real Patient" in profile_names else 0,
+    help="Loading a profile resets all Patient Model and Algorithm settings.",
 )
 profile_path = profile_names[selected_profile_name]
 
@@ -375,11 +411,13 @@ tab_results, tab_patient, tab_algo = st.tabs([
 # ─── Tab 2: Patient Model ────────────────────────────────────────────────────
 
 with tab_patient:
+    st.caption("These are the active settings used when you click **Run Simulation**. "
+               "Use **Load Profile** in the sidebar to reset from a preset.")
     st.subheader("Meal Schedule")
     st.caption("Times are in 24h clock format (HH:MM). Day starts at 07:00.")
 
     st.markdown("**Declared Meals**")
-    st.data_editor(
+    edited_meals = st.data_editor(
         st.session_state["meals_df"],
         num_rows="dynamic",
         use_container_width=True,
@@ -395,9 +433,10 @@ with tab_patient:
                 "Absorption (hrs)", min_value=0.5, max_value=8.0, step=0.5),
         },
     )
+    st.session_state["meals_df"] = edited_meals
 
     st.markdown("**Undeclared Meals** (always eaten, never bolused)")
-    st.data_editor(
+    edited_undeclared = st.data_editor(
         st.session_state["undeclared_meals_df"],
         num_rows="dynamic",
         use_container_width=True,
@@ -413,6 +452,7 @@ with tab_patient:
                 "Absorption (hrs)", min_value=0.5, max_value=8.0, step=0.5),
         },
     )
+    st.session_state["undeclared_meals_df"] = edited_undeclared
 
     st.divider()
 
@@ -516,6 +556,37 @@ with tab_patient:
         min_value=70, max_value=250, step=5,
         key="starting_bg_sl",
     )
+
+    st.divider()
+
+    # ─── Save controls ──────────────────────────────────────────────────────
+    st.subheader("Save Profile")
+    save_col1, save_col2 = st.columns(2)
+    with save_col1:
+        if st.button("Save", use_container_width=True,
+                      help="Overwrite the currently loaded profile"):
+            loaded = st.session_state.get("loaded_profile")
+            if loaded:
+                save_profile_to_json(loaded)
+                profile_name = Path(loaded).stem.replace("_", " ").title()
+                st.success(f"Saved to **{profile_name}**.")
+            else:
+                st.warning("No profile loaded — use Save As instead.")
+    with save_col2:
+        new_name = st.text_input("Profile name", key="save_as_name",
+                                 placeholder="e.g. my_custom_profile")
+        if st.button("Save As...", use_container_width=True):
+            name = st.session_state.get("save_as_name", "").strip()
+            if not name:
+                st.warning("Enter a profile name.")
+            else:
+                filename = name.lower().replace(" ", "_")
+                if not filename.endswith(".json"):
+                    filename += ".json"
+                save_path = str(profile_dir / filename)
+                save_profile_to_json(save_path)
+                st.session_state["loaded_profile"] = save_path
+                st.success(f"Saved as **{filename}**. Reload the page to see it in the dropdown.")
 
 
 # ─── Tab 3: Algorithm Settings ──────────────────────────────────────────────
