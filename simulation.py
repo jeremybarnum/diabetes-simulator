@@ -82,6 +82,13 @@ class PatientProfile:
     # Starting BG
     starting_bg: float = 120.0
 
+    # Rescue carbs (patient self-treats lows)
+    rescue_carbs_enabled: bool = True
+    rescue_threshold: float = 70.0    # BG below this triggers rescue
+    rescue_carbs_grams: float = 8.0   # grams per rescue dose
+    rescue_absorption_hrs: float = 1.0  # absorption time
+    rescue_cooldown_min: float = 15.0   # minutes between doses
+
     # Algorithm settings (pump programming) — loaded from settings.json if None
     algorithm_settings: Optional[Dict] = None
 
@@ -115,6 +122,11 @@ class PatientProfile:
             exercises_per_week=data.get('exercises_per_week', 0.0),
             exercise_spec=exercise_spec,
             starting_bg=data.get('starting_bg', 100.0),
+            rescue_carbs_enabled=data.get('rescue_carbs_enabled', True),
+            rescue_threshold=data.get('rescue_threshold', 70.0),
+            rescue_carbs_grams=data.get('rescue_carbs_grams', 8.0),
+            rescue_absorption_hrs=data.get('rescue_absorption_hrs', 1.0),
+            rescue_cooldown_min=data.get('rescue_cooldown_min', 15.0),
             algorithm_settings=settings,
         )
 
@@ -477,14 +489,7 @@ class SimulationRun:
         total_steps = self.n_days * 288  # 288 five-min steps per day
 
         # Rescue carbs state
-        # TODO: Make rescue carbs configurable in PatientProfile (threshold, grams,
-        # absorption, cooldown) and add an enable/disable toggle so the user can
-        # choose whether the simulated patient self-treats lows.
-        last_rescue_time = -1e9  # last time rescue carbs were eaten
-        RESCUE_THRESHOLD = 70    # BG below this triggers rescue
-        RESCUE_CARBS = 8.0       # grams
-        RESCUE_ABSORPTION = 1.0  # hours
-        RESCUE_COOLDOWN = 15     # minutes between rescue doses
+        last_rescue_time = -1e9
 
         # Pruning cutoff: at 400 min, both insulin (DIA=370min) and carbs
         # (max ~4h absorption) are fully absorbed → delta is 0 → safe to prune.
@@ -550,10 +555,16 @@ class SimulationRun:
             running_bg += delta
             bg = running_bg
 
-            # --- Rescue carbs: patient eats if BG < 70 (undeclared) ---
+            # --- Rescue carbs: patient eats if BG is low (undeclared) ---
             # Effect starts next step (more realistic — carbs take time)
-            if bg < RESCUE_THRESHOLD and (current_time - last_rescue_time) >= RESCUE_COOLDOWN:
-                actual_carbs.append((current_time, RESCUE_CARBS, RESCUE_ABSORPTION))
+            if (self.profile.rescue_carbs_enabled
+                    and bg < self.profile.rescue_threshold
+                    and (current_time - last_rescue_time) >= self.profile.rescue_cooldown_min):
+                actual_carbs.append((
+                    current_time,
+                    self.profile.rescue_carbs_grams,
+                    self.profile.rescue_absorption_hrs,
+                ))
                 last_rescue_time = current_time
 
             cgm_history.append((current_time, bg))

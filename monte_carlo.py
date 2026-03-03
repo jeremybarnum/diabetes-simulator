@@ -148,6 +148,11 @@ def _profile_from_dict(d: Dict) -> PatientProfile:
         exercises_per_week=d.get('exercises_per_week', 0.0),
         exercise_spec=exercise_spec,
         starting_bg=d.get('starting_bg', 100.0),
+        rescue_carbs_enabled=d.get('rescue_carbs_enabled', True),
+        rescue_threshold=d.get('rescue_threshold', 70.0),
+        rescue_carbs_grams=d.get('rescue_carbs_grams', 8.0),
+        rescue_absorption_hrs=d.get('rescue_absorption_hrs', 1.0),
+        rescue_cooldown_min=d.get('rescue_cooldown_min', 15.0),
         algorithm_settings=d.get('algorithm_settings'),
     )
 
@@ -183,6 +188,11 @@ def _profile_to_dict(p: PatientProfile) -> Dict:
         'exercises_per_week': p.exercises_per_week,
         'exercise_spec': ex,
         'starting_bg': p.starting_bg,
+        'rescue_carbs_enabled': p.rescue_carbs_enabled,
+        'rescue_threshold': p.rescue_threshold,
+        'rescue_carbs_grams': p.rescue_carbs_grams,
+        'rescue_absorption_hrs': p.rescue_absorption_hrs,
+        'rescue_cooldown_min': p.rescue_cooldown_min,
         'algorithm_settings': p.get_settings(),
     }
 
