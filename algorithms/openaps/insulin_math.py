@@ -195,25 +195,15 @@ def iob_calc_exponential(
     iob_contrib = 0.0
 
     if mins_ago < end:
-        # Exponential insulin action curve formula
-        # Formula source: https://github.com/LoopKit/Loop/issues/388#issuecomment-317938473
-        #
-        # Variable mapping from original:
-        #   td = end (duration)
-        #   tp = peak (peak time)
-        #   t  = mins_ago (time since dose)
+        tau = peak * (1 - peak / end) / (1 - 2 * peak / end)
+        a = 2 * tau / end
+        S = 1 / (1 - a + (1 + a) * math.exp(-end / tau))
 
-        tau = peak * (1 - peak / end) / (1 - 2 * peak / end)  # Time constant
-        a = 2 * tau / end  # Rise time factor
-        S = 1 / (1 - a + (1 + a) * math.exp(-end / tau))  # Scale factor
-
-        # Activity: instantaneous insulin action rate
         activity_contrib = (
             insulin * (S / (tau ** 2)) * mins_ago *
             (1 - mins_ago / end) * math.exp(-mins_ago / tau)
         )
 
-        # IOB: remaining active insulin
         iob_contrib = insulin * (
             1 - S * (1 - a) * (
                 (mins_ago ** 2 / (tau * end * (1 - a)) - mins_ago / tau - 1) *

@@ -4,7 +4,7 @@ Exact insulin action curve implementation from LoopKit.
 Based on LoopKit's ExponentialInsulinModel.swift with exact formulas.
 """
 
-import numpy as np
+import math
 from enum import Enum
 
 
@@ -52,7 +52,7 @@ class ExponentialInsulinModelExact:
         self.a = 2.0 * self.tau / action_duration_minutes
 
         # S = 1 / (1 - a + (1 + a)×exp(-actionDuration/τ))
-        self.S = 1.0 / (1.0 - self.a + (1.0 + self.a) * np.exp(-action_duration_minutes / self.tau))
+        self.S = 1.0 / (1.0 - self.a + (1.0 + self.a) * math.exp(-action_duration_minutes / self.tau))
 
     def percent_effect_remaining(self, time_minutes: float) -> float:
         """
@@ -66,21 +66,15 @@ class ExponentialInsulinModelExact:
         Returns:
             Fraction of effect remaining (0-1), where 1.0 = 100% remaining
         """
-        # Case 1: Before delay
         if time_minutes <= self.delay:
             return 1.0
 
-        # Adjust for delay
         t = time_minutes - self.delay
 
-        # Case 2: After full action duration
         if t >= self.action_duration:
             return 0.0
 
-        # Case 3: During active period - use exact LoopKit formula
-        # percentEffectRemaining = 1 - S×(1-a)×((t²/(τ×actionDuration×(1-a)) - t/τ - 1)×exp(-t/τ) + 1)
-
-        exp_term = np.exp(-t / self.tau)
+        exp_term = math.exp(-t / self.tau)
 
         inner_term = (t * t / (self.tau * self.action_duration * (1.0 - self.a)) -
                      t / self.tau -
