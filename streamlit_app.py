@@ -174,7 +174,7 @@ def load_profile_to_state(profile_path: str):
     st.session_state["suspend_threshold_in"] = float(settings.get("suspend_threshold", 80.0))
     st.session_state["max_basal_rate_in"] = float(settings.get("max_basal_rate", 2.8))
     st.session_state["max_bolus_in"] = float(settings.get("max_bolus", 3.0))
-    st.session_state["insulin_type_in"] = settings.get("insulin_type", "fiasp")
+    st.session_state["insulin_type_in"] = settings.get("insulin_type", "rapid_acting_adult")
     st.session_state["enable_irc_cb"] = bool(settings.get("enable_irc", True))
     st.session_state["enable_momentum_cb"] = bool(settings.get("enable_momentum", True))
     st.session_state["enable_dca_cb"] = bool(settings.get("enable_dca", True))
@@ -254,7 +254,7 @@ def build_profile_from_state() -> PatientProfile:
         "suspend_threshold": st.session_state.get("suspend_threshold_in", 80.0),
         "max_basal_rate": st.session_state.get("max_basal_rate_in", 2.8),
         "max_bolus": st.session_state.get("max_bolus_in", 3.0),
-        "insulin_type": st.session_state.get("insulin_type_in", "fiasp"),
+        "insulin_type": st.session_state.get("insulin_type_in", "rapid_acting_adult"),
         "enable_irc": st.session_state.get("enable_irc_cb", True),
         "enable_momentum": st.session_state.get("enable_momentum_cb", True),
         "enable_dca": st.session_state.get("enable_dca_cb", True),
@@ -772,8 +772,8 @@ with tab_algo:
             help="Duration of Insulin Action: how long insulin stays active after delivery. "
                  "Fiasp default is 6 hours.",
         )
-        _insulin_type_options = ["fiasp", "lyumjev", "rapid_acting_adult", "rapid_acting_child", "afrezza"]
-        _insulin_type_labels = ["Fiasp (ultra-rapid)", "Lyumjev (ultra-rapid)", "Humalog/Novolog (rapid-acting)", "Rapid-Acting (child)", "Afrezza (inhaled)"]
+        _insulin_type_options = ["rapid_acting_adult", "fiasp", "lyumjev", "rapid_acting_child", "afrezza"]
+        _insulin_type_labels = ["Humalog/Novolog (rapid-acting)", "Fiasp (ultra-rapid)", "Lyumjev (ultra-rapid)", "Rapid-Acting (child)", "Afrezza (inhaled)"]
         st.selectbox(
             "Insulin Type",
             options=_insulin_type_options,
