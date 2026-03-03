@@ -477,6 +477,9 @@ class SimulationRun:
         total_steps = self.n_days * 288  # 288 five-min steps per day
 
         # Rescue carbs state
+        # TODO: Make rescue carbs configurable in PatientProfile (threshold, grams,
+        # absorption, cooldown) and add an enable/disable toggle so the user can
+        # choose whether the simulated patient self-treats lows.
         last_rescue_time = -1e9  # last time rescue carbs were eaten
         RESCUE_THRESHOLD = 70    # BG below this triggers rescue
         RESCUE_CARBS = 8.0       # grams
@@ -544,7 +547,7 @@ class SimulationRun:
                 current_time, 5.0, bolus_history, basal_deficit_entries,
                 actual_carbs, sim_start_time=sim_start,
             )
-            running_bg = max(39.0, min(400.0, running_bg + delta))
+            running_bg += delta
             bg = running_bg
 
             # --- Rescue carbs: patient eats if BG < 70 (undeclared) ---
