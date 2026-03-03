@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 
 from simulation import (PatientProfile, SimulationRun, SimulationRunResult,
                         save_batch_results, load_batch_results)
+from monte_carlo import _algo_seed_offset
 from nightscout_query import (NIGHTSCOUT_URL, fetch_entries)
 
 
@@ -88,7 +89,7 @@ def run_independent_days(profile, algorithm_name, n_days=30, seed=42):
     trace = []
     results = []
     for day in range(n_days):
-        path_seed = seed + day * 1000 + hash(algorithm_name) % (2**31)
+        path_seed = seed + day * 1000 + _algo_seed_offset(algorithm_name)
         rng = np.random.RandomState(path_seed)
         sim = SimulationRun(profile=profile, algorithm_name=algorithm_name,
                             n_days=1, rng=rng)

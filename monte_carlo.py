@@ -98,6 +98,20 @@ def compute_metrics(result: SimulationRunResult) -> GlycemicMetrics:
     )
 
 
+# ─── Seeding ─────────────────────────────────────────────────────────────────
+
+def _algo_seed_offset(algo_name: str) -> int:
+    """Deterministic seed offset from algorithm name.
+
+    TODO(jeremy): Python's built-in hash() is randomized per-process
+    (PYTHONHASHSEED), so using hash(algo_name) for RNG seeding made results
+    non-reproducible across runs, and different between local and Modal cloud
+    workers. This uses md5 instead for a stable, deterministic mapping.
+    """
+    import hashlib
+    return int(hashlib.md5(algo_name.encode()).hexdigest(), 16) % (2**31)
+
+
 # ─── Single Path Runner (top-level for pickling) ─────────────────────────────
 
 def _run_single_path(args) -> Dict[str, dict]:
@@ -113,7 +127,7 @@ def _run_single_path(args) -> Dict[str, dict]:
 
     results = {}
     for algo_name in algorithms:
-        rng = np.random.RandomState(path_seed + hash(algo_name) % (2**31))
+        rng = np.random.RandomState(path_seed + _algo_seed_offset(algo_name))
         sim = SimulationRun(
             profile=profile,
             algorithm_name=algo_name,

@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from simulation import (PatientProfile, SimulationRun, SimulationRunResult,
                         save_batch_results, load_batch_results)
+from monte_carlo import _algo_seed_offset
 
 
 def run_paths(profile, algorithm_name, n_paths, seed):
@@ -29,7 +30,7 @@ def run_paths(profile, algorithm_name, n_paths, seed):
     traces = []
     results = []
     for i in range(n_paths):
-        path_seed = seed + i * 1000 + hash(algorithm_name) % (2**31)
+        path_seed = seed + i * 1000 + _algo_seed_offset(algorithm_name)
         rng = np.random.RandomState(path_seed)
         sim = SimulationRun(profile=profile, algorithm_name=algorithm_name,
                             n_days=1, rng=rng)
