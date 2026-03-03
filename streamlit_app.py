@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 
 from simulation import PatientProfile, MealSpec, ExerciseSpec, SimulationRun, SimulationRunResult
-from monte_carlo import compute_metrics, GlycemicMetrics
+from monte_carlo import compute_metrics, GlycemicMetrics, _algo_seed_offset
 
 try:
     import modal
@@ -321,7 +321,6 @@ def run_paths(profile, algorithm_name, n_paths, n_days, seed):
     traces_by_day: list of lists. Each path produces n_days day-traces.
     Each day-trace is [(hours_in_day, bg), ...].
     """
-    from monte_carlo import _algo_seed_offset
     all_day_traces = []
     all_metrics = []
     for i in range(n_paths):
