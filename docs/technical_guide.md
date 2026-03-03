@@ -252,6 +252,91 @@ The Trio/oref1 implementation has been validated against the actual JavaScript s
 
 ---
 
+## Development Process
+
+This project was built iteratively over about six weeks (late January to early March 2026), with each algorithm ported from its original source code and validated against the real system before being integrated into the simulator. The entire codebase — algorithm ports, patient model, simulation engine, validation infrastructure, and UI — was developed with Claude Code as a pair-programming partner.
+
+### Porting the Loop Algorithm
+
+The Loop algorithm was ported from Swift (LoopKit) to Python, working module by module through the prediction pipeline:
+
+1. **Insulin and carb math** came first — the exponential insulin model and piecewise linear carb absorption model, validated against LoopKit's own test fixtures
+2. **DCA (Dynamic Carb Absorption)** was the most complex component, requiring deep study of LoopKit's `CarbStatus.swift` and `DynamicCarbAbsorption.swift` to understand the three-mode COB calculation and ICE splitting logic
+3. **Momentum, IRC, and dosing logic** completed the prediction pipeline
+4. **The `subtracting()` rewrite** (February 15) was a critical bug fix — Python's IRC discrepancy calculation didn't match iOS's `LoopMath.swift:279-334` due to two subtle issues: mutual trim logic on misaligned grids, and a fixed 5-minute effect interval that iOS uses regardless of actual ICE interval duration
+
+The port went through several iterations where behavior appeared correct on simple tests but diverged from iOS on complex scenarios, requiring progressively deeper study of the Swift source.
+
+### Validating Loop Against iOS
+
+The hardest engineering challenge was building infrastructure to validate the Python port against the real iOS Loop app running in the Xcode simulator. The problem: iOS Loop reads all its data exclusively from HealthKit. There is no test API or dependency injection point.
+
+**The solution was a custom iOS "injector" app** (`HealthKitInjectorApp`) that runs in the same simulator alongside Loop:
+
+1. **HealthKit injection**: The injector app writes glucose samples, carb entries, and insulin doses directly into HealthKit with the correct metadata — CGM-style device tags (not "manually entered," which Loop ignores), LoopKit absorption time keys, Fiasp insulin type metadata, and proper origin flags
+2. **Command-file protocol**: Python drives the injector via the simulator's shared filesystem. It writes scenario JSON files into the app's sandbox, then drops command files (`clear_all`, `inject:<filename>`) that the injector polls for every second. Python confirms execution by watching for the command file to disappear
+3. **Modified Loop build**: A custom build of iOS Loop (Loop 3.10.0, bundle ID `com.Exercise.Loop`) with added `NSLog()` statements tagged with `##LOOP##` markers that emit structured data — therapy settings, intermediate effects (ICE, momentum, IRC), and the full prediction array
+4. **Log capture**: After injecting data and waiting for Loop to compute (~6-8 seconds), `batch_validate.py` extracts the simulator's log stream via `xcrun simctl spawn ... log show`, parses the structured `##LOOP##` lines, and compares iOS's predictions against the Python port
+
+This yielded two levels of validation:
+- **LoopTestRunner** (a Swift CLI tool calling LoopKit directly) validated algorithm math against offline fixtures: 78 predictions match at 0.000 mg/dL
+- **batch_validate.py** (the full iOS pipeline) validated against the running app including HealthKit data ingestion, with 6 scenarios passing at ≤1.0 mg/dL tolerance
+
+A key workaround: iOS Loop won't compute ICE (and thus IRC) without insulin history in the dose store. Tests that don't naturally include insulin use a 0.2U "trigger bolus" at t-180 minutes — small enough not to affect predictions, but sufficient to activate the ICE pipeline.
+
+### Porting the Trio/oref1 Algorithm
+
+Trio was ported from JavaScript (OpenAPS's `oref0` library) to Python. The approach was phase-by-phase with a ground truth runner:
+
+1. **Ground truth runner**: A Node.js wrapper (`trio_runner.js`) that calls the actual `determine-basal.js` from Trio's source. Python converts scenarios to Trio's JSON format, shells out to Node.js, and compares results. This made validation much faster than the iOS approach — no simulator, no HealthKit, just function-call-level comparison
+2. **IOB pipeline**: Ported the insulin-on-board calculation and validated to 0.000 max difference
+3. **Deviation COB**: Ported the deviation-based carb tracking (conceptually similar to Loop's ICE but classified into carb/UAM/non-meal categories)
+4. **Predictions**: Ported all four prediction paths (IOB, ZT, COB, UAM). ZT matched exactly; COB and UAM had 1-3 mg/dL differences due to floating-point ordering
+5. **determine_basal**: Ported the full decision tree — 9 of 10 test scenarios produced exact rate/duration/SMB matches, with 1 test showing a 0.05 U/hr rounding difference
+6. **Autosens and Dynamic ISF**: Ported the 24-hour sensitivity analysis and both logarithmic and sigmoid ISF scaling modes
+
+Key gotchas discovered during the Trio port:
+- `console.log` redirect: `determine-basal.js` uses `console.log` (not `console.error`) for debug output, so the Node.js wrapper had to redirect stdout to stderr to keep it out of the JSON result
+- **CGM unchanged guard**: oref1 exits early if all deltas are zero — test scenarios need non-zero BG changes
+- **Top-of-hour guard**: oref1 cancels temps if minutes ≥ 55 (an OpenAPS safety feature) — test scenarios use :30 past the hour
+
+### Building the Patient Model
+
+The patient model evolved through several iterations:
+
+1. **Phase 1** attempted to use `simglucose` (the FDA-approved UVA/Padova simulator) but it proved too complex and opaque for the comparison use case
+2. **A custom patient model** was built instead, using the same insulin and carb math as the algorithms. This is intentional — the patient's physiology uses identical insulin curves, so any prediction errors come from the *information gap* (carb counting, sensitivity variation) rather than model mismatch
+3. **Stochastic infrastructure** added lognormal variation to carb amounts, absorption times, and insulin sensitivity, with proper dual tracking of declared vs. actual parameters
+4. **The delta-based approach** (the most recent commit before documentation) was a critical fix for multi-day simulations: instead of computing absolute BG from cumulative insulin/carb effects (which drifted over days due to floating-point accumulation), each step computes only the incremental BG change
+
+### Streamlit UI
+
+Streamlit was chosen for the web UI because it provides a fast path from Python simulation code to an interactive app with minimal frontend work. Key implementation choices:
+
+- **Tabbed layout** separates results, patient model editing, and algorithm settings, keeping the interface manageable despite many parameters
+- **`st.data_editor`** for meal tables allows users to add, remove, and edit meals directly in the browser
+- **Session state management** bridges the gap between Streamlit's rerun model and the need to persist editable state — profile loading writes directly to `st.session_state` keys that widgets read via their `key=` parameters
+- **Patient profiles** are stored as JSON files and can be saved/loaded, making it easy to share and reproduce scenarios
+
+The app is deployed on Streamlit Community Cloud, which auto-deploys from the GitHub repository.
+
+### Modal for Cloud Parallelization
+
+The Monte Carlo simulation is embarrassingly parallel — each path is independent — but running 500 paths × 7 days locally takes significant time. Modal (a serverless compute platform) was integrated as a CLI-only parallelism layer:
+
+- **Architecture**: `monte_carlo_cloud.py` wraps the same `_run_single_path()` function from `monte_carlo.py`. Each cloud worker receives one `(seed, profile, algorithms, n_days)` tuple, runs the simulation, and returns metrics. No algorithm code is duplicated
+- **Fan-out**: Modal's `starmap` dispatches all N paths simultaneously. Results stream back as workers complete, enabling real-time progress reporting
+- **Container setup**: The entire project directory is synced into a Debian slim container with numpy and scipy. Each worker is allocated 1 CPU and 512MB — no GPU needed since the simulation is pure Python math
+- **Reproducibility**: Seeding is identical to the local runner, so the same seed produces the same results whether run locally or in the cloud
+
+The local Streamlit app and the Modal CLI runner are completely independent execution paths — `streamlit_app.py` doesn't import anything from `monte_carlo_cloud.py`. A researcher who wants cloud-scale runs simply swaps `python3 monte_carlo.py` for `modal run monte_carlo_cloud.py`.
+
+### Role of Claude Code
+
+The entire project was developed using Claude Code (Anthropic's AI coding assistant) as a pair-programming partner. Claude Code wrote the majority of the code across all components — algorithm ports, validation infrastructure, patient model, simulation engine, Streamlit UI, and Modal integration — working from the original Swift and JavaScript source code, iOS documentation, and iterative debugging against the validation harnesses. The human role was primarily architectural direction, clinical domain knowledge, and reviewing/testing the outputs.
+
+---
+
 ## Design Choices
 
 ### Why Fiasp?
