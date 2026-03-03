@@ -1055,6 +1055,9 @@ Every path draws fresh random values for meal sizes, carb counting errors, insul
 sensitivity, and exercise — so the collection of paths shows the range of outcomes you'd
 see over many real days.
 
+When Modal (a serverless compute platform) is available, paths are automatically
+dispatched to cloud workers in parallel for faster results. Otherwise, paths run locally.
+
 ---
 
 ## Understanding the Algorithms

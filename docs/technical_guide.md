@@ -322,14 +322,16 @@ The app is deployed on Streamlit Community Cloud, which auto-deploys from the Gi
 
 ### Modal for Cloud Parallelization
 
-The Monte Carlo simulation is embarrassingly parallel — each path is independent — but running 500 paths × 7 days locally takes significant time. Modal (a serverless compute platform) was integrated as a CLI-only parallelism layer:
+The Monte Carlo simulation is embarrassingly parallel — each path is independent — but running hundreds of paths locally is slow. Modal (a serverless compute platform) was integrated to fan out paths across cloud workers:
 
 - **Architecture**: `monte_carlo_cloud.py` wraps the same `_run_single_path()` function from `monte_carlo.py`. Each cloud worker receives one `(seed, profile, algorithms, n_days)` tuple, runs the simulation, and returns metrics. No algorithm code is duplicated
 - **Fan-out**: Modal's `starmap` dispatches all N paths simultaneously. Results stream back as workers complete, enabling real-time progress reporting
 - **Container setup**: The entire project directory is synced into a Debian slim container with numpy and scipy. Each worker is allocated 1 CPU and 512MB — no GPU needed since the simulation is pure Python math
 - **Reproducibility**: Seeding is identical to the local runner, so the same seed produces the same results whether run locally or in the cloud
 
-The local Streamlit app and the Modal CLI runner are completely independent execution paths — `streamlit_app.py` doesn't import anything from `monte_carlo_cloud.py`. A researcher who wants cloud-scale runs simply swaps `python3 monte_carlo.py` for `modal run monte_carlo_cloud.py`.
+Modal is available through two execution paths:
+- **Streamlit app**: When Modal is installed, the app automatically dispatches paths to cloud workers instead of running locally. If Modal is unavailable or fails, it falls back to local execution transparently. A progress bar shows cloud completion in real time
+- **CLI**: `modal run monte_carlo_cloud.py` provides the same cloud parallelism for batch runs outside the UI
 
 ### Role of Claude Code
 
