@@ -15,6 +15,12 @@ from pathlib import Path
 from simulation import PatientProfile, MealSpec, ExerciseSpec, SimulationRun, SimulationRunResult
 from monte_carlo import compute_metrics, GlycemicMetrics
 
+try:
+    import modal
+    MODAL_AVAILABLE = True
+except ImportError:
+    MODAL_AVAILABLE = False
+
 # ─── Page config ─────────────────────────────────────────────────────────────
 
 st.set_page_config(
@@ -333,6 +339,51 @@ def run_paths(profile, algorithm_name, n_paths, n_days, seed):
             path_days.append(trace)
         all_day_traces.append(path_days)
     return all_day_traces, all_metrics
+
+
+def run_paths_cloud(profile, algorithms, n_paths, n_days, seed, progress_cb=None):
+    """Run all paths on Modal cloud workers. Returns (traces_by_algo, metrics_by_algo).
+
+    Each Modal worker runs one path for all algorithms. Results are collected
+    and converted to the same format as run_paths().
+    """
+    from monte_carlo import _profile_to_dict
+    from monte_carlo_cloud import run_path_remote, app as modal_app
+    from simulation import SimulationRunResult
+
+    profile_dict = _profile_to_dict(profile)
+
+    args_list = []
+    for i in range(n_paths):
+        path_seed = seed + i * 1000
+        args_list.append((path_seed, profile_dict, algorithms, n_days))
+
+    traces_by_algo = {name: [] for name in algorithms}
+    metrics_by_algo = {name: [] for name in algorithms}
+
+    completed = 0
+    with modal_app.run():
+        for result in run_path_remote.starmap(args_list, order_outputs=False):
+            for algo_name, data in result.items():
+                metrics = data['metrics']
+                if isinstance(metrics, dict):
+                    metrics = GlycemicMetrics(**metrics)
+                metrics_by_algo[algo_name].append(metrics)
+
+                run_result = SimulationRunResult.from_dict(data['result'])
+                path_days = []
+                for day in run_result.days:
+                    day_offset_min = day.day_index * 1440
+                    trace = [((t_rel - day_offset_min) / 60, bg)
+                             for t_rel, bg in day.bg_trace]
+                    path_days.append(trace)
+                traces_by_algo[algo_name].append(path_days)
+
+            completed += 1
+            if progress_cb:
+                progress_cb(completed / n_paths)
+
+    return traces_by_algo, metrics_by_algo
 
 
 def plot_spaghetti(traces_by_algo, algo_colors, n_paths, n_days):
@@ -754,14 +805,33 @@ with tab_results:
             progress = st.progress(0, text="Starting simulation...")
             total_algos = len(algorithms)
 
-            for i, algo_name in enumerate(algorithms):
-                progress.progress(
-                    i / total_algos,
-                    text=f"Running {algo_name} ({n_paths} paths x {n_days} days)..."
-                )
-                traces, metrics = run_paths(profile, algo_name, n_paths, n_days, seed)
-                traces_by_algo[algo_name] = traces
-                metrics_by_algo[algo_name] = metrics
+            cloud_success = False
+            if MODAL_AVAILABLE and n_paths > 1:
+                try:
+                    progress.progress(
+                        0, text=f"Running on Modal Cloud ({n_paths} paths x {n_days} days)...")
+
+                    def update_progress(frac):
+                        progress.progress(
+                            min(frac, 0.99),
+                            text=f"Cloud: {int(frac * n_paths)}/{n_paths} paths complete...")
+
+                    traces_by_algo, metrics_by_algo = run_paths_cloud(
+                        profile, algorithms, n_paths, n_days, seed,
+                        progress_cb=update_progress)
+                    cloud_success = True
+                except Exception as e:
+                    st.warning(f"Modal cloud failed ({e}), falling back to local...")
+
+            if not cloud_success:
+                for i, algo_name in enumerate(algorithms):
+                    progress.progress(
+                        i / total_algos,
+                        text=f"Running {algo_name} ({n_paths} paths x {n_days} days)..."
+                    )
+                    traces, metrics = run_paths(profile, algo_name, n_paths, n_days, seed)
+                    traces_by_algo[algo_name] = traces
+                    metrics_by_algo[algo_name] = metrics
 
             progress.progress(1.0, text="Done!")
 
