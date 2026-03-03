@@ -84,10 +84,11 @@ class PatientProfile:
 
     # Rescue carbs (patient self-treats lows)
     rescue_carbs_enabled: bool = True
-    rescue_threshold: float = 70.0    # BG below this triggers rescue
+    rescue_threshold: float = 65.0    # BG below this triggers rescue
     rescue_carbs_grams: float = 8.0   # grams per rescue dose
     rescue_absorption_hrs: float = 1.0  # absorption time
     rescue_cooldown_min: float = 15.0   # minutes between doses
+    rescue_carbs_declared: bool = False  # whether patient tells pump about rescue carbs
 
     # Algorithm settings (pump programming) — loaded from settings.json if None
     algorithm_settings: Optional[Dict] = None
@@ -123,10 +124,11 @@ class PatientProfile:
             exercise_spec=exercise_spec,
             starting_bg=data.get('starting_bg', 100.0),
             rescue_carbs_enabled=data.get('rescue_carbs_enabled', True),
-            rescue_threshold=data.get('rescue_threshold', 70.0),
+            rescue_threshold=data.get('rescue_threshold', 65.0),
             rescue_carbs_grams=data.get('rescue_carbs_grams', 8.0),
             rescue_absorption_hrs=data.get('rescue_absorption_hrs', 1.0),
             rescue_cooldown_min=data.get('rescue_cooldown_min', 15.0),
+            rescue_carbs_declared=data.get('rescue_carbs_declared', False),
             algorithm_settings=settings,
         )
 
@@ -149,6 +151,8 @@ class DayResult:
     meals: List[MealEvent]
     exercises: List[ExerciseEvent]
     sensitivity_trace: List[Tuple[float, float]]  # [(time, scalar), ...]
+    rescue_carb_events: int = 0
+    rescue_carb_grams_total: float = 0.0
 
     def to_dict(self) -> Dict:
         return {
@@ -172,6 +176,8 @@ class DayResult:
                 for e in self.exercises
             ],
             'sensitivity_trace': self.sensitivity_trace,
+            'rescue_carb_events': self.rescue_carb_events,
+            'rescue_carb_grams_total': self.rescue_carb_grams_total,
         }
 
     @classmethod
@@ -185,6 +191,8 @@ class DayResult:
             meals=meals,
             exercises=exercises,
             sensitivity_trace=[tuple(p) for p in d.get('sensitivity_trace', [])],
+            rescue_carb_events=d.get('rescue_carb_events', 0),
+            rescue_carb_grams_total=d.get('rescue_carb_grams_total', 0.0),
         )
 
 
@@ -502,6 +510,19 @@ class SimulationRun:
             day_index = step // 288
             step_in_day = step % 288
 
+            # --- Start new day (must be first so rescue/recording can reference it) ---
+            if step_in_day == 0:
+                day_results.append(DayResult(
+                    day_index=day_index,
+                    bg_trace=[],
+                    bolus_history=[],
+                    meals=[m for m in all_meals
+                           if day_index * 1440 <= (m.time_minutes - self.t0_min) < (day_index + 1) * 1440],
+                    exercises=[e for e in exercise_events
+                               if day_index * 1440 <= (e.start_time_minutes - self.t0_min) < (day_index + 1) * 1440],
+                    sensitivity_trace=[],
+                ))
+
             # --- Check for meals at this step ---
             for meal in all_meals:
                 if abs(current_time - meal.time_minutes) < 0.1:
@@ -555,17 +576,19 @@ class SimulationRun:
             running_bg += delta
             bg = running_bg
 
-            # --- Rescue carbs: patient eats if BG is low (undeclared) ---
+            # --- Rescue carbs: patient eats if BG is low ---
             # Effect starts next step (more realistic — carbs take time)
             if (self.profile.rescue_carbs_enabled
                     and bg < self.profile.rescue_threshold
                     and (current_time - last_rescue_time) >= self.profile.rescue_cooldown_min):
-                actual_carbs.append((
-                    current_time,
-                    self.profile.rescue_carbs_grams,
-                    self.profile.rescue_absorption_hrs,
-                ))
+                grams = self.profile.rescue_carbs_grams
+                absorption_hrs = self.profile.rescue_absorption_hrs
+                actual_carbs.append((current_time, grams, absorption_hrs))
+                if self.profile.rescue_carbs_declared:
+                    declared_carbs.append((current_time, grams, absorption_hrs))
                 last_rescue_time = current_time
+                day_results[-1].rescue_carb_events += 1
+                day_results[-1].rescue_carb_grams_total += grams
 
             cgm_history.append((current_time, bg))
 
@@ -607,19 +630,6 @@ class SimulationRun:
                 bolus_history.append((current_time, tb_net))
 
             # --- Record to day result ---
-            if step_in_day == 0:
-                # Start new day
-                day_results.append(DayResult(
-                    day_index=day_index,
-                    bg_trace=[],
-                    bolus_history=[],
-                    meals=[m for m in all_meals
-                           if day_index * 1440 <= (m.time_minutes - self.t0_min) < (day_index + 1) * 1440],
-                    exercises=[e for e in exercise_events
-                               if day_index * 1440 <= (e.start_time_minutes - self.t0_min) < (day_index + 1) * 1440],
-                    sensitivity_trace=[],
-                ))
-
             day_results[-1].bg_trace.append((t_rel, bg))
             day_results[-1].sensitivity_trace.append(
                 (t_rel, patient.get_sensitivity_scalar(t_rel)))

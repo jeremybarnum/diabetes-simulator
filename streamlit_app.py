@@ -78,6 +78,12 @@ def save_profile_to_json(file_path: str):
         "sensitivity_sigma": profile.sensitivity_sigma,
         "exercises_per_week": profile.exercises_per_week,
         "starting_bg": profile.starting_bg,
+        "rescue_carbs_enabled": profile.rescue_carbs_enabled,
+        "rescue_threshold": profile.rescue_threshold,
+        "rescue_carbs_grams": profile.rescue_carbs_grams,
+        "rescue_absorption_hrs": profile.rescue_absorption_hrs,
+        "rescue_cooldown_min": profile.rescue_cooldown_min,
+        "rescue_carbs_declared": profile.rescue_carbs_declared,
     }
     if profile.exercise_spec:
         ex = profile.exercise_spec
@@ -178,6 +184,14 @@ def load_profile_to_state(profile_path: str):
     st.session_state["sigmoid_isf_cb"] = False
     st.session_state["adj_factor_sigmoid_sl"] = 0.5
 
+    # Rescue carbs
+    st.session_state["rescue_enabled_cb"] = bool(profile.rescue_carbs_enabled)
+    st.session_state["rescue_threshold_sl"] = float(profile.rescue_threshold)
+    st.session_state["rescue_grams_sl"] = float(profile.rescue_carbs_grams)
+    st.session_state["rescue_absorption_sl"] = float(profile.rescue_absorption_hrs)
+    st.session_state["rescue_cooldown_sl"] = float(profile.rescue_cooldown_min)
+    st.session_state["rescue_declared_cb"] = bool(profile.rescue_carbs_declared)
+
     st.session_state["loaded_profile"] = profile_path
 
 
@@ -256,6 +270,12 @@ def build_profile_from_state() -> PatientProfile:
         exercises_per_week=epw,
         exercise_spec=exercise_spec,
         starting_bg=float(st.session_state.get("starting_bg_sl", 120)),
+        rescue_carbs_enabled=st.session_state.get("rescue_enabled_cb", True),
+        rescue_threshold=st.session_state.get("rescue_threshold_sl", 70.0),
+        rescue_carbs_grams=st.session_state.get("rescue_grams_sl", 8.0),
+        rescue_absorption_hrs=st.session_state.get("rescue_absorption_sl", 1.0),
+        rescue_cooldown_min=st.session_state.get("rescue_cooldown_sl", 15.0),
+        rescue_carbs_declared=st.session_state.get("rescue_declared_cb", False),
         algorithm_settings=algo_settings,
     )
 
@@ -315,11 +335,12 @@ run_button = st.sidebar.button("Run Simulation", type="primary", use_container_w
 
 # ─── Helper functions ────────────────────────────────────────────────────────
 
-def run_paths(profile, algorithm_name, n_paths, n_days, seed):
+def run_paths(profile, algorithm_name, n_paths, n_days, seed, progress_cb=None):
     """Run n_paths simulations, return (traces_by_day, list of metrics).
 
     traces_by_day: list of lists. Each path produces n_days day-traces.
     Each day-trace is [(hours_in_day, bg), ...].
+    progress_cb: optional callback(completed_count) called after each path.
     """
     all_day_traces = []
     all_metrics = []
@@ -338,6 +359,9 @@ def run_paths(profile, algorithm_name, n_paths, n_days, seed):
             trace = [((t_rel - day_offset_min) / 60, bg) for t_rel, bg in day.bg_trace]
             path_days.append(trace)
         all_day_traces.append(path_days)
+
+        if progress_cb:
+            progress_cb(i + 1)
     return all_day_traces, all_metrics
 
 
@@ -461,6 +485,8 @@ def compute_summary_stats(all_metrics):
         "CV (%)": f"{np.mean([m.cv for m in all_metrics]):.1f}",
         "GMI (%)": f"{np.mean([m.gmi for m in all_metrics]):.2f}",
         "Hypo events/path": f"{np.mean([m.hypo_events for m in all_metrics]):.2f}",
+        "Rescue carb events/path": f"{np.mean([m.rescue_carb_events for m in all_metrics]):.1f}",
+        "Rescue carbs (g)/path": f"{np.mean([m.rescue_carb_grams_total for m in all_metrics]):.0f}",
     }
 
 
@@ -621,6 +647,51 @@ with tab_patient:
                 min_value=0.0, max_value=0.30, step=0.05,
                 key="ex_actual_duration_sigma_sl",
             )
+
+    st.divider()
+
+    st.subheader("Rescue Carbs")
+    st.checkbox(
+        "Enable rescue carbs",
+        key="rescue_enabled_cb",
+        help="When BG drops below threshold, the simulated patient eats fast-acting carbs.",
+    )
+
+    if st.session_state.get("rescue_enabled_cb", True):
+        rc_col1, rc_col2 = st.columns(2)
+        with rc_col1:
+            st.slider(
+                "BG threshold (mg/dL)",
+                min_value=50, max_value=100, step=5,
+                key="rescue_threshold_sl",
+                help="Patient eats rescue carbs when BG drops below this value.",
+            )
+            st.slider(
+                "Carbs per rescue (g)",
+                min_value=4, max_value=30, step=2,
+                key="rescue_grams_sl",
+                help="Grams of fast-acting carbs consumed per rescue event.",
+            )
+        with rc_col2:
+            st.slider(
+                "Absorption time (hrs)",
+                min_value=0.5, max_value=3.0, step=0.5,
+                key="rescue_absorption_sl",
+                help="How quickly rescue carbs are absorbed (shorter = faster-acting).",
+            )
+            st.slider(
+                "Time between rescue carbs (min)",
+                min_value=5, max_value=60, step=5,
+                key="rescue_cooldown_sl",
+                help="Minimum wait before another rescue dose.",
+            )
+        st.checkbox(
+            "Declare rescue carbs to algorithm",
+            key="rescue_declared_cb",
+            help="If checked, rescue carbs are entered into the pump (no bolus). "
+                 "The algorithm sees the COB and may reduce insulin delivery. "
+                 "If unchecked, rescue carbs are invisible to the algorithm.",
+        )
 
     st.divider()
 
@@ -802,22 +873,39 @@ with tab_results:
             traces_by_algo = {}
             metrics_by_algo = {}
 
-            progress = st.progress(0, text="Starting simulation...")
-            total_algos = len(algorithms)
+            import time as _time
+            algo_labels = [a.replace("_", " ").upper() for a in algorithms]
+            algo_summary = " vs ".join(algo_labels)
+            total_work = f"{n_paths} paths x {n_days} days"
+
+            progress = st.progress(0, text=f"Starting {algo_summary} — {total_work}...")
+            t_start = _time.time()
+
+            def _eta_str(elapsed, frac):
+                if frac <= 0:
+                    return ""
+                remaining = elapsed / frac * (1 - frac)
+                if remaining < 60:
+                    return f"~{remaining:.0f}s left"
+                return f"~{remaining / 60:.1f}m left"
 
             cloud_success = False
             if MODAL_AVAILABLE and n_paths > 1:
                 try:
                     progress.progress(
-                        0, text=f"Running on Modal Cloud ({n_paths} paths x {n_days} days)...")
+                        0, text=f"Connecting to Modal Cloud — {algo_summary}, {total_work}...")
 
                     def update_progress(frac):
                         done = int(frac * n_paths)
+                        elapsed = _time.time() - t_start
                         if done >= n_paths:
-                            progress.progress(1.0, text="Rendering results...")
+                            progress.progress(1.0,
+                                text=f"Cloud: all {n_paths} paths done in {elapsed:.1f}s — rendering...")
                         else:
+                            eta = _eta_str(elapsed, frac)
                             progress.progress(frac,
-                                text=f"Cloud: {done}/{n_paths} paths complete...")
+                                text=f"Cloud: {done}/{n_paths} paths — "
+                                     f"{elapsed:.0f}s elapsed, {eta}")
 
                     traces_by_algo, metrics_by_algo = run_paths_cloud(
                         profile, algorithms, n_paths, n_days, seed,
@@ -825,18 +913,38 @@ with tab_results:
                     cloud_success = True
                 except Exception as e:
                     st.warning(f"Modal cloud failed ({e}), falling back to local...")
+                    t_start = _time.time()
 
             if not cloud_success:
+                total_paths = len(algorithms) * n_paths
+                paths_done = 0
+
                 for i, algo_name in enumerate(algorithms):
-                    progress.progress(
-                        i / total_algos,
-                        text=f"Running {algo_name} ({n_paths} paths x {n_days} days)..."
-                    )
-                    traces, metrics = run_paths(profile, algo_name, n_paths, n_days, seed)
+                    label = algo_name.replace("_", " ").upper()
+
+                    def local_progress_cb(path_count, _label=label, _offset=paths_done):
+                        done = _offset + path_count
+                        frac = done / total_paths
+                        elapsed = _time.time() - t_start
+                        eta = _eta_str(elapsed, frac)
+                        progress.progress(frac,
+                            text=f"{_label}: path {path_count}/{n_paths} — "
+                                 f"{done}/{total_paths} total, "
+                                 f"{elapsed:.0f}s elapsed, {eta}")
+
+                    progress.progress(paths_done / total_paths,
+                        text=f"{label}: starting ({paths_done}/{total_paths} total)...")
+                    traces, metrics = run_paths(
+                        profile, algo_name, n_paths, n_days, seed,
+                        progress_cb=local_progress_cb)
                     traces_by_algo[algo_name] = traces
                     metrics_by_algo[algo_name] = metrics
+                    paths_done += n_paths
 
-            progress.progress(1.0, text="Done!")
+            elapsed_total = _time.time() - t_start
+            where = "cloud" if cloud_success else "local"
+            progress.progress(1.0,
+                text=f"Done — {algo_summary}, {total_work} in {elapsed_total:.1f}s ({where})")
 
             # Spaghetti plot
             st.subheader("BG Traces")

@@ -1,27 +1,57 @@
 {
-    "_comment": "Calibrated from Nightscout data. ~70g actual daily carbs.",
-
     "meals": [
-        {"time_of_day_minutes": 90, "carbs_mean": 12, "carbs_sd": 4, "absorption_hrs": 3.0},
-        {"time_of_day_minutes": 330, "carbs_mean": 15, "carbs_sd": 5, "absorption_hrs": 3.0},
-        {"time_of_day_minutes": 690, "carbs_mean": 20, "carbs_sd": 6, "absorption_hrs": 3.5},
-        {"time_of_day_minutes": 480, "carbs_mean": 5, "carbs_sd": 3, "absorption_hrs": 2.5},
-        {"time_of_day_minutes": 570, "carbs_mean": 5, "carbs_sd": 3, "absorption_hrs": 2.5},
-        {"time_of_day_minutes": 810, "carbs_mean": 5, "carbs_sd": 3, "absorption_hrs": 2.5}
+        {
+            "time_of_day_minutes": 90,
+            "carbs_mean": 12.0,
+            "carbs_sd": 4.0,
+            "absorption_hrs": 3.0
+        },
+        {
+            "time_of_day_minutes": 330,
+            "carbs_mean": 15.0,
+            "carbs_sd": 5.0,
+            "absorption_hrs": 3.0
+        },
+        {
+            "time_of_day_minutes": 690,
+            "carbs_mean": 20.0,
+            "carbs_sd": 6.0,
+            "absorption_hrs": 3.5
+        },
+        {
+            "time_of_day_minutes": 480,
+            "carbs_mean": 5.0,
+            "carbs_sd": 3.0,
+            "absorption_hrs": 2.5
+        },
+        {
+            "time_of_day_minutes": 570,
+            "carbs_mean": 5.0,
+            "carbs_sd": 3.0,
+            "absorption_hrs": 2.5
+        },
+        {
+            "time_of_day_minutes": 810,
+            "carbs_mean": 5.0,
+            "carbs_sd": 3.0,
+            "absorption_hrs": 2.5
+        }
     ],
-
     "undeclared_meals": [
-        {"time_of_day_minutes": 30, "carbs_mean": 8, "carbs_sd": 4, "absorption_hrs": 2.0}
+        {
+            "time_of_day_minutes": 30,
+            "carbs_mean": 8.0,
+            "carbs_sd": 4.0,
+            "absorption_hrs": 2.0
+        }
     ],
-
     "carb_count_sigma": 0.35,
     "carb_count_bias": 0.0,
-    "absorption_sigma": 0.20,
-    "undeclared_meal_prob": 0.10,
-
+    "absorption_sigma": 0.2,
+    "undeclared_meal_prob": 0.1,
     "sensitivity_sigma": 0.15,
-
-    "exercises_per_week": 4,
+    "exercises_per_week": 4.0,
+    "starting_bg": 115.0,
     "exercise_spec": {
         "time_of_day_minutes": 330,
         "declared_scalar": 0.5,
@@ -29,8 +59,6 @@
         "actual_scalar_mean": 0.5,
         "actual_scalar_sigma": 0.15,
         "actual_duration_hrs_mean": 6.0,
-        "actual_duration_hrs_sigma": 0.20
-    },
-
-    "starting_bg": 100.0
+        "actual_duration_hrs_sigma": 0.2
+    }
 }

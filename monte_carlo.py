@@ -44,6 +44,9 @@ class GlycemicMetrics:
 
     hypo_events: int = 0          # BG < 70 for >= 15 min (3 consecutive readings)
 
+    rescue_carb_events: int = 0
+    rescue_carb_grams_total: float = 0.0
+
     n_readings: int = 0
 
 
@@ -81,6 +84,9 @@ def compute_metrics(result: SimulationRunResult) -> GlycemicMetrics:
     if consecutive_low >= 3:
         hypo_events += 1
 
+    rescue_events = sum(d.rescue_carb_events for d in result.days)
+    rescue_grams = sum(d.rescue_carb_grams_total for d in result.days)
+
     return GlycemicMetrics(
         mean_bg=mean_bg,
         sd_bg=sd_bg,
@@ -94,6 +100,8 @@ def compute_metrics(result: SimulationRunResult) -> GlycemicMetrics:
         min_bg=float(np.min(arr)),
         max_bg=float(np.max(arr)),
         hypo_events=hypo_events,
+        rescue_carb_events=rescue_events,
+        rescue_carb_grams_total=rescue_grams,
         n_readings=n,
     )
 
@@ -163,10 +171,11 @@ def _profile_from_dict(d: Dict) -> PatientProfile:
         exercise_spec=exercise_spec,
         starting_bg=d.get('starting_bg', 100.0),
         rescue_carbs_enabled=d.get('rescue_carbs_enabled', True),
-        rescue_threshold=d.get('rescue_threshold', 70.0),
+        rescue_threshold=d.get('rescue_threshold', 65.0),
         rescue_carbs_grams=d.get('rescue_carbs_grams', 8.0),
         rescue_absorption_hrs=d.get('rescue_absorption_hrs', 1.0),
         rescue_cooldown_min=d.get('rescue_cooldown_min', 15.0),
+        rescue_carbs_declared=d.get('rescue_carbs_declared', False),
         algorithm_settings=d.get('algorithm_settings'),
     )
 
@@ -207,6 +216,7 @@ def _profile_to_dict(p: PatientProfile) -> Dict:
         'rescue_carbs_grams': p.rescue_carbs_grams,
         'rescue_absorption_hrs': p.rescue_absorption_hrs,
         'rescue_cooldown_min': p.rescue_cooldown_min,
+        'rescue_carbs_declared': p.rescue_carbs_declared,
         'algorithm_settings': p.get_settings(),
     }
 
