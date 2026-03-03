@@ -473,7 +473,15 @@ class SimulationRun:
         algo, exporter = self._create_algorithm()
 
         # Insulin model for IOB computation
-        insulin_model = create_insulin_model(InsulinType.FIASP,
+        insulin_type_map = {
+            'fiasp': InsulinType.FIASP,
+            'rapid_acting_adult': InsulinType.RAPID_ACTING_ADULT,
+            'rapid_acting_child': InsulinType.RAPID_ACTING_CHILD,
+            'lyumjev': InsulinType.LYUMJEV,
+            'afrezza': InsulinType.AFREZZA,
+        }
+        insulin_type = insulin_type_map.get(settings.get('insulin_type', 'fiasp'), InsulinType.FIASP)
+        insulin_model = create_insulin_model(insulin_type,
                                              settings['duration_of_insulin_action'])
 
         # State carried across days
