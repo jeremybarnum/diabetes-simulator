@@ -96,28 +96,32 @@ def load_profile_to_state(profile_path: str):
     profile = PatientProfile.from_json(profile_path)
     settings = profile.get_settings()
 
-    # Meals as DataFrames for data_editor
-    st.session_state["meals_df"] = pd.DataFrame([
-        {
-            "Time": _minutes_to_clock(m.time_of_day_minutes),
-            "Avg Carbs (g)": float(m.carbs_mean),
-            "SD (g)": float(m.carbs_sd),
-            "Absorption (hrs)": float(m.absorption_hrs),
-        }
-        for m in profile.meals
-    ]) if profile.meals else pd.DataFrame(
+    # Meals as DataFrames for data_editor (sorted chronologically)
+    st.session_state["meals_df"] = pd.DataFrame(
+        sorted([
+            {
+                "Time": _minutes_to_clock(m.time_of_day_minutes),
+                "Avg Carbs (g)": float(m.carbs_mean),
+                "SD (g)": float(m.carbs_sd),
+                "Absorption (hrs)": float(m.absorption_hrs),
+            }
+            for m in profile.meals
+        ], key=lambda r: r["Time"])
+    ) if profile.meals else pd.DataFrame(
         columns=["Time", "Avg Carbs (g)", "SD (g)", "Absorption (hrs)"]
     )
 
-    st.session_state["undeclared_meals_df"] = pd.DataFrame([
-        {
-            "Time": _minutes_to_clock(m.time_of_day_minutes),
-            "Avg Carbs (g)": float(m.carbs_mean),
-            "SD (g)": float(m.carbs_sd),
-            "Absorption (hrs)": float(m.absorption_hrs),
-        }
-        for m in profile.undeclared_meals
-    ]) if profile.undeclared_meals else pd.DataFrame(
+    st.session_state["undeclared_meals_df"] = pd.DataFrame(
+        sorted([
+            {
+                "Time": _minutes_to_clock(m.time_of_day_minutes),
+                "Avg Carbs (g)": float(m.carbs_mean),
+                "SD (g)": float(m.carbs_sd),
+                "Absorption (hrs)": float(m.absorption_hrs),
+            }
+            for m in profile.undeclared_meals
+        ], key=lambda r: r["Time"])
+    ) if profile.undeclared_meals else pd.DataFrame(
         columns=["Time", "Avg Carbs (g)", "SD (g)", "Absorption (hrs)"]
     )
 
@@ -433,7 +437,7 @@ with tab_patient:
                 "Absorption (hrs)", min_value=0.5, max_value=8.0, step=0.5),
         },
     )
-    st.session_state["meals_df"] = edited_meals
+    st.session_state["meals_df"] = edited_meals.sort_values("Time").reset_index(drop=True)
 
     st.markdown("**Undeclared Meals** (always eaten, never bolused)")
     edited_undeclared = st.data_editor(
@@ -452,7 +456,7 @@ with tab_patient:
                 "Absorption (hrs)", min_value=0.5, max_value=8.0, step=0.5),
         },
     )
-    st.session_state["undeclared_meals_df"] = edited_undeclared
+    st.session_state["undeclared_meals_df"] = edited_undeclared.sort_values("Time").reset_index(drop=True)
 
     st.divider()
 
