@@ -812,13 +812,15 @@ with tab_results:
                         0, text=f"Running on Modal Cloud ({n_paths} paths x {n_days} days)...")
 
                     def update_progress(frac):
+                        done = int(frac * n_paths)
                         progress.progress(
                             min(frac, 0.99),
-                            text=f"Cloud: {int(frac * n_paths)}/{n_paths} paths complete...")
+                            text=f"Cloud: {done}/{n_paths} paths complete...")
 
                     traces_by_algo, metrics_by_algo = run_paths_cloud(
                         profile, algorithms, n_paths, n_days, seed,
                         progress_cb=update_progress)
+                    progress.progress(1.0, text="Rendering results...")
                     cloud_success = True
                 except Exception as e:
                     st.warning(f"Modal cloud failed ({e}), falling back to local...")
