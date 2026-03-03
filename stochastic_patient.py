@@ -317,3 +317,73 @@ class EnhancedPatientModel:
 
         bg = self.starting_bg + insulin_effect + carb_effect + basal_drift
         return max(39.0, min(400.0, bg))
+
+    def compute_bg_delta(
+        self,
+        current_time: float,
+        dt: float,
+        bolus_history: List[Tuple[float, float]],
+        basal_deficit_entries: List[Tuple[float, float]],
+        carb_entries: List[Tuple[float, float, float]],
+        sim_start_time: float = 0.0,
+    ) -> float:
+        """
+        Compute BG change for one time step (delta-based).
+
+        Instead of recomputing BG from scratch, this returns the change in BG
+        over [current_time - dt, current_time]. The caller maintains a running BG.
+
+        Args:
+            current_time: Current time in minutes (absolute)
+            dt: Time step in minutes (typically 5)
+            bolus_history: [(time_min, units), ...] — real insulin doses
+            basal_deficit_entries: [(time_min, units), ...] — virtual insulin from
+                sensitivity mismatch (patient-only, algorithm doesn't see these)
+            carb_entries: [(time_min, grams, absorption_hrs), ...] — actual carbs
+            sim_start_time: Simulation start time (for sensitivity model)
+
+        Returns:
+            BG delta in mg/dL for this step
+        """
+        from itertools import chain
+
+        t_rel = current_time - sim_start_time
+        s_now = self.get_sensitivity_scalar(t_rel)
+        dia_minutes = self.insulin_model.action_duration + 10  # buffer
+
+        # --- Insulin delta (real doses + basal deficit virtual doses) ---
+        insulin_delta = 0.0
+        for dose_time, units in chain(bolus_history, basal_deficit_entries):
+            elapsed = current_time - dose_time
+            if elapsed < 0 or elapsed > dia_minutes:
+                continue
+            pct_now = self.insulin_model.percent_absorbed(elapsed)
+            pct_prev = self.insulin_model.percent_absorbed(elapsed - dt)
+            # true_ISF = settings_ISF / S(t)
+            insulin_delta += -units * (self.settings_isf / s_now) * (pct_now - pct_prev)
+
+        # --- Carb delta (independent of sensitivity — CSF is invariant) ---
+        carb_delta = 0.0
+        csf = self.settings_isf / self.carb_ratio  # mg/dL per gram, constant
+        CARB_DELAY_MIN = 10.0
+        carb_model = self.carb_math.model
+
+        for carb_time, grams, abs_hrs in carb_entries:
+            elapsed = current_time - carb_time
+            max_duration = abs_hrs * 60 + CARB_DELAY_MIN + 10  # buffer
+            if elapsed < 0 or elapsed > max_duration:
+                continue
+            # Apply delay externally (model expects time after delay)
+            eff_now_hrs = max(0.0, (elapsed - CARB_DELAY_MIN) / 60.0)
+            eff_prev_hrs = max(0.0, (elapsed - dt - CARB_DELAY_MIN) / 60.0)
+            pct_now = carb_model.percent_absorbed_at_time(eff_now_hrs, abs_hrs)
+            pct_prev = carb_model.percent_absorbed_at_time(eff_prev_hrs, abs_hrs)
+            carb_delta += grams * csf * (pct_now - pct_prev)
+
+        # TODO: BG-dependent sensitivity — S(t) could also depend on current BG
+        # (e.g., insulin resistance increases at high BG). This would require
+        # the caller to pass running_bg so we can compute S(t, BG). Also need
+        # error estimation to understand how approximation errors accumulate
+        # in the delta-based approach over multi-day simulations.
+
+        return insulin_delta + carb_delta

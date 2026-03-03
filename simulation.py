@@ -462,6 +462,11 @@ class SimulationRun:
         declared_carbs: List[Tuple[float, float, float]] = []
         # Actual carb entries (what patient absorbs)
         actual_carbs: List[Tuple[float, float, float]] = []
+        # Virtual insulin entries from sensitivity mismatch (patient-only)
+        basal_deficit_entries: List[Tuple[float, float]] = []
+
+        # Delta-based BG: accumulated step by step
+        running_bg = self.profile.starting_bg
 
         # Pre-seed CGM history (algorithm needs a few points for momentum/deltas)
         cgm_history: List[Tuple[float, float]] = []
@@ -477,6 +482,12 @@ class SimulationRun:
         RESCUE_CARBS = 8.0       # grams
         RESCUE_ABSORPTION = 1.0  # hours
         RESCUE_COOLDOWN = 15     # minutes between rescue doses
+
+        # Pruning cutoff: at 400 min, both insulin (DIA=370min) and carbs
+        # (max ~4h absorption) are fully absorbed → delta is 0 → safe to prune.
+        PRUNE_AGE_MIN = 400
+
+        sim_start = self.t0_min
 
         for step in range(total_steps):
             current_time = self.t0_min + step * 5
@@ -505,6 +516,16 @@ class SimulationRun:
                             bolus_history.append((current_time, bolus_units))
                     # If undeclared: patient eats but doesn't tell pump, no bolus
 
+            # --- Basal deficit from sensitivity mismatch ---
+            # Pump delivers scheduled_basal, but patient needs scheduled_basal * S(t).
+            # Deficit = basal * (1 - S(t)) * dt/60 units of "virtual insulin"
+            # that the patient experiences but the algorithm doesn't see.
+            t_rel = current_time - sim_start
+            s_now = patient.get_sensitivity_scalar(t_rel)
+            if abs(s_now - 1.0) > 1e-6:
+                deficit_units = basal_rate * (1.0 - s_now) * 5.0 / 60.0
+                basal_deficit_entries.append((current_time, deficit_units))
+
             # --- Determine effective basal (exercise reduces delivery) ---
             effective_basal = basal_rate
             for ex in exercise_events:
@@ -512,25 +533,25 @@ class SimulationRun:
                     effective_basal = basal_rate * ex.declared_scalar
                     break
 
-            # Record basal reduction as negative bolus so patient model
-            # sees less insulin delivered during exercise
+            # Record basal reduction as negative bolus so both patient model
+            # and algorithm see less insulin delivered during exercise
             if effective_basal != basal_rate:
                 basal_reduction = (effective_basal - basal_rate) * 5.0 / 60.0
                 bolus_history.append((current_time, basal_reduction))
 
-            # --- Compute true BG ---
-            sim_start = self.t0_min
-            bg = patient.compute_bg(current_time, bolus_history, actual_carbs,
-                                    sim_start_time=sim_start)
+            # --- Compute BG delta for this step ---
+            delta = patient.compute_bg_delta(
+                current_time, 5.0, bolus_history, basal_deficit_entries,
+                actual_carbs, sim_start_time=sim_start,
+            )
+            running_bg = max(39.0, min(400.0, running_bg + delta))
+            bg = running_bg
 
             # --- Rescue carbs: patient eats if BG < 70 (undeclared) ---
+            # Effect starts next step (more realistic — carbs take time)
             if bg < RESCUE_THRESHOLD and (current_time - last_rescue_time) >= RESCUE_COOLDOWN:
                 actual_carbs.append((current_time, RESCUE_CARBS, RESCUE_ABSORPTION))
                 last_rescue_time = current_time
-                # Recompute BG with rescue carbs (won't change much at t=0,
-                # but keeps state consistent)
-                bg = patient.compute_bg(current_time, bolus_history, actual_carbs,
-                                        sim_start_time=sim_start)
 
             cgm_history.append((current_time, bg))
 
@@ -585,20 +606,21 @@ class SimulationRun:
                     sensitivity_trace=[],
                 ))
 
-            t_rel = current_time - self.t0_min
             day_results[-1].bg_trace.append((t_rel, bg))
             day_results[-1].sensitivity_trace.append(
                 (t_rel, patient.get_sensitivity_scalar(t_rel)))
 
-            # Prune old history to avoid unbounded growth
-            # Keep last 8 hours of CGM (96 points) and last 8h of boluses
-            cutoff = current_time - 480
+            # --- Prune old entries ---
+            # With delta-based BG, fully absorbed entries contribute 0 delta
+            # and can be safely removed — their effect is baked into running_bg.
+            prune_cutoff = current_time - PRUNE_AGE_MIN
+            cgm_cutoff = current_time - 480
             if len(cgm_history) > 200:
-                cgm_history = [(t, v) for t, v in cgm_history if t >= cutoff]
-            if len(bolus_history) > 500:
-                # Keep recent boluses plus any with remaining IOB
-                iob_cutoff = current_time - 400  # ~6.7 hours (full DIA)
-                bolus_history = [(t, u) for t, u in bolus_history if t >= iob_cutoff]
+                cgm_history = [(t, v) for t, v in cgm_history if t >= cgm_cutoff]
+            bolus_history = [(t, u) for t, u in bolus_history if t >= prune_cutoff]
+            basal_deficit_entries = [(t, u) for t, u in basal_deficit_entries if t >= prune_cutoff]
+            actual_carbs = [(t, g, a) for t, g, a in actual_carbs if t >= prune_cutoff]
+            declared_carbs = [(t, g, a) for t, g, a in declared_carbs if t >= prune_cutoff]
 
         return SimulationRunResult(
             algorithm_name=self.algorithm_name,
