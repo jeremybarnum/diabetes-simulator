@@ -501,7 +501,7 @@ ALGO_COLORS = {
 }
 
 tab_results, tab_patient, tab_algo, tab_help = st.tabs([
-    "Results", "Patient Model", "Algorithm Settings", "Help",
+    "Results", "Patient Model", "Algorithm & Therapy Settings", "Help",
 ])
 
 # ─── Tab 2: Patient Model ────────────────────────────────────────────────────
@@ -737,10 +737,10 @@ with tab_patient:
                 st.success(f"Saved as **{filename}**. Reload the page to see it in the dropdown.")
 
 
-# ─── Tab 3: Algorithm Settings ──────────────────────────────────────────────
+# ─── Tab 3: Algorithm & Therapy Settings ──────────────────────────────────────────────
 
 with tab_algo:
-    st.subheader("Core Pump Settings")
+    st.subheader("Core Therapy Settings")
 
     ac1, ac2, ac3 = st.columns(3)
     with ac1:
@@ -1020,7 +1020,7 @@ with tab_results:
         - **Undeclared meals** (snacks the pump doesn't know about)
 
         Use the **Patient Model** tab to edit meals, carb counting skill, exercise,
-        etc. Use the **Algorithm Settings** tab to change pump settings like ISF, CR,
+        etc. Use the **Algorithm & Therapy Settings** tab to change therapy settings like ISF, CR,
         basal, etc.
 
         Select a patient profile from the sidebar as a starting point, then customize.
