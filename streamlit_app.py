@@ -282,13 +282,27 @@ selected_algos = st.sidebar.multiselect(
     "Algorithms",
     list(algo_options.keys()),
     default=["Loop AB40 (Auto-Bolus)", "Trio (oref1 SMB)"],
+    help="Loop AB40 delivers 40% of needed insulin as micro-boluses every 5 min. "
+         "Loop Temp Basal adjusts the basal rate only. "
+         "Trio uses oref1 SMB logic with 4-path predictions.",
 )
 algorithms = [algo_options[name] for name in selected_algos]
 
 # Simulation parameters
-n_paths = st.sidebar.slider("Number of paths", min_value=5, max_value=100, value=20, step=5)
-n_days = st.sidebar.slider("Days per path", min_value=1, max_value=14, value=1, step=1)
-seed = st.sidebar.number_input("Random seed", value=42, min_value=0, max_value=99999)
+n_paths = st.sidebar.slider(
+    "Number of paths", min_value=5, max_value=100, value=20, step=5,
+    help="Each path is one possible day with random meal sizes, carb counting errors, "
+         "and sensitivity variation. More paths = more reliable statistics.",
+)
+n_days = st.sidebar.slider(
+    "Days per path", min_value=1, max_value=14, value=1, step=1,
+    help="Multi-day paths let the algorithm build up history (autosens, IOB carry-over). "
+         "All days are overlaid on a single 24h plot.",
+)
+seed = st.sidebar.number_input(
+    "Random seed", value=42, min_value=0, max_value=99999,
+    help="Fixed seed makes results reproducible. Change it to see different random draws.",
+)
 
 run_button = st.sidebar.button("Run Simulation", type="primary", use_container_width=True)
 
@@ -408,8 +422,8 @@ ALGO_COLORS = {
     "trio": "#dc2626",
 }
 
-tab_results, tab_patient, tab_algo = st.tabs([
-    "Results", "Patient Model", "Algorithm Settings",
+tab_results, tab_patient, tab_algo, tab_help = st.tabs([
+    "Results", "Patient Model", "Algorithm Settings", "Help",
 ])
 
 # ─── Tab 2: Patient Model ────────────────────────────────────────────────────
@@ -418,7 +432,9 @@ with tab_patient:
     st.caption("These are the active settings used when you click **Run Simulation**. "
                "Use **Load Profile** in the sidebar to reset from a preset.")
     st.subheader("Meal Schedule")
-    st.caption("Times are in 24h clock format (HH:MM). Day starts at 07:00.")
+    st.caption("Times are in 24h clock format (HH:MM). Day starts at 07:00. "
+               "Declared meals are entered into the pump (with carb-counting error applied). "
+               "Undeclared meals are eaten but never bolused for.")
 
     st.markdown("**Declared Meals**")
     edited_meals = st.data_editor(
@@ -506,6 +522,9 @@ with tab_patient:
         "Exercise sessions per week",
         min_value=0.0, max_value=7.0, step=0.5,
         key="exercises_per_week_sl",
+        help="Each day independently has a chance of exercise = sessions/7. "
+             "Exercise increases insulin sensitivity, and the mismatch between "
+             "declared and actual effect creates a realistic challenge.",
     )
 
     if st.session_state["exercises_per_week_sl"] > 0:
@@ -559,6 +578,8 @@ with tab_patient:
         "Starting blood glucose (mg/dL)",
         min_value=70, max_value=250, step=5,
         key="starting_bg_sl",
+        help="BG at 7:00am when each simulated day begins. "
+             "Both algorithms start with no active insulin or carbs.",
     )
 
     st.divider()
@@ -604,33 +625,42 @@ with tab_algo:
             "ISF (mg/dL per unit)",
             min_value=10.0, max_value=300.0, step=5.0,
             key="isf_in",
+            help="Insulin Sensitivity Factor: how much 1 unit of insulin lowers BG. "
+                 "Higher = more sensitive.",
         )
         st.number_input(
             "Carb Ratio (g per unit)",
             min_value=3.0, max_value=30.0, step=0.5,
             key="carb_ratio_in",
+            help="Carb-to-insulin ratio: grams of carbs covered by 1 unit of insulin.",
         )
     with ac2:
         st.number_input(
             "Basal Rate (U/hr)",
             min_value=0.1, max_value=5.0, step=0.05,
             key="basal_rate_in",
+            help="Scheduled background insulin delivery rate. The algorithm adjusts "
+                 "this up or down via temp basals.",
         )
         st.number_input(
             "DIA (hours)",
             min_value=3.0, max_value=8.0, step=0.5,
             key="dia_in",
+            help="Duration of Insulin Action: how long insulin stays active after delivery. "
+                 "Fiasp default is 6 hours.",
         )
     with ac3:
         st.number_input(
             "Target BG (mg/dL)",
             min_value=70.0, max_value=150.0, step=5.0,
             key="target_bg_in",
+            help="The BG value the algorithm tries to steer toward with corrections.",
         )
         st.number_input(
             "Suspend Threshold (mg/dL)",
             min_value=50.0, max_value=100.0, step=5.0,
             key="suspend_threshold_in",
+            help="If predicted BG drops below this, insulin delivery is suspended (zero temp).",
         )
 
     st.divider()
@@ -642,12 +672,16 @@ with tab_algo:
             "Max Basal Rate (U/hr)",
             min_value=0.5, max_value=10.0, step=0.1,
             key="max_basal_rate_in",
+            help="Safety ceiling for temp basal rates. Limits how aggressively "
+                 "the algorithm can increase insulin delivery.",
         )
     with lc2:
         st.number_input(
             "Max Bolus (U)",
             min_value=0.5, max_value=10.0, step=0.5,
             key="max_bolus_in",
+            help="Maximum single auto-bolus or SMB the algorithm can deliver. "
+                 "Also caps meal boluses.",
         )
 
     st.divider()
@@ -655,33 +689,53 @@ with tab_algo:
     st.subheader("Feature Toggles (Loop)")
     fc1, fc2, fc3 = st.columns(3)
     with fc1:
-        st.checkbox("Enable IRC", key="enable_irc_cb")
+        st.checkbox(
+            "Enable IRC", key="enable_irc_cb",
+            help="Integral Retrospective Correction: compares predicted vs actual BG "
+                 "over the past 3 hours and applies a correction to future predictions.",
+        )
     with fc2:
-        st.checkbox("Enable Momentum", key="enable_momentum_cb")
+        st.checkbox(
+            "Enable Momentum", key="enable_momentum_cb",
+            help="Projects the recent BG trend (last ~15 min) forward into predictions, "
+                 "helping the algorithm react faster to rapid changes.",
+        )
     with fc3:
-        st.checkbox("Enable DCA", key="enable_dca_cb")
+        st.checkbox(
+            "Enable DCA", key="enable_dca_cb",
+            help="Dynamic Carb Absorption: adjusts predicted carb effects based on "
+                 "observed glucose changes, detecting faster or slower absorption than declared.",
+        )
 
     st.divider()
 
     st.subheader("Autosens / Dynamic ISF (Trio)")
     tc1, tc2 = st.columns(2)
     with tc1:
-        st.checkbox("Autosens Enabled", key="autosens_enabled_cb")
+        st.checkbox(
+            "Autosens Enabled", key="autosens_enabled_cb",
+            help="Analyzes the past 24 hours of BG data to detect if the patient is "
+                 "more or less insulin sensitive than usual, and adjusts ISF/basal/target.",
+        )
         st.checkbox(
             "Dynamic ISF (Use New Formula)",
             key="use_new_formula_cb",
-            help="Logarithmic dynamic ISF: adjusts ISF based on current BG",
+            help="Logarithmic dynamic ISF: adjusts ISF based on current BG. "
+                 "Higher BG = lower ISF (more aggressive corrections).",
         )
     with tc2:
         st.checkbox(
             "Sigmoid ISF",
             key="sigmoid_isf_cb",
-            help="Use sigmoid curve instead of logarithmic for dynamic ISF",
+            help="Uses a sigmoid curve for dynamic ISF instead of logarithmic. "
+                 "Provides smoother scaling that levels off at extreme BG values.",
         )
         st.slider(
             "Adjustment Factor Sigmoid",
             min_value=0.1, max_value=1.0, step=0.1,
             key="adj_factor_sigmoid_sl",
+            help="Controls the aggressiveness of sigmoid dynamic ISF. "
+                 "Lower = gentler adjustments, higher = more aggressive.",
         )
 
 
@@ -779,3 +833,134 @@ with tab_results:
 
         Select a patient profile from the sidebar as a starting point, then customize.
         """)
+
+
+# ─── Tab 4: Help ─────────────────────────────────────────────────────────────
+
+with tab_help:
+    st.markdown("""
+## Quick Start
+
+1. **Pick a profile** — select a patient profile from the sidebar (e.g., "Real Patient")
+2. **Tweak settings** — adjust meals, carb counting ability, and algorithm settings in the tabs
+3. **Run** — click **Run Simulation** to generate Monte Carlo results
+
+---
+
+## How the Simulator Works
+
+The simulator runs many independent "paths" — each one simulates a full day (or multi-day
+period) of a Type 1 diabetic wearing an insulin pump controlled by a closed-loop algorithm.
+
+Each 5-minute step:
+1. **Patient physiology** computes BG change from active insulin, absorbing carbs, and
+   basal deficit (if sensitivity differs from the algorithm's assumption)
+2. **The algorithm** sees the CGM reading and its own insulin/carb history, then decides
+   whether to adjust the temp basal, deliver a micro-bolus, or suspend delivery
+3. If BG drops below 70, the simulated patient eats 8g rescue carbs (undeclared)
+
+Every path draws fresh random values for meal sizes, carb counting errors, insulin
+sensitivity, and exercise — so the collection of paths shows the range of outcomes you'd
+see over many real days.
+
+---
+
+## Understanding the Algorithms
+
+### Loop (Auto-Bolus 40%)
+Loop is a prediction-based system that builds a single 6-hour forecast from several
+components:
+
+- **Insulin effect** — where current insulin-on-board will take BG
+- **Carb effect** — expected BG rise from declared carbs (adjusted by DCA if absorption
+  differs from declared)
+- **Momentum** — short-term CGM trend projected forward (~15 min)
+- **IRC** — correction based on how well predictions matched reality over the past 3 hours
+
+In Auto-Bolus mode, Loop delivers 40% of the calculated insulin requirement as a
+micro-bolus every 5 minutes, plus a reduced temp basal.
+
+### Loop (Temp Basal)
+Same prediction pipeline, but corrections are delivered entirely via temporary basal rate
+adjustments — no micro-boluses. Generally more conservative.
+
+### Trio (oref1 SMB)
+Trio uses the OpenAPS oref1 algorithm. Instead of a single prediction, it computes four
+parallel forecasts:
+
+- **IOB** — assumes no more carb absorption
+- **ZT (Zero Temp)** — what happens if delivery stops now
+- **COB** — carbs absorb at declared rate
+- **UAM** — unannounced-meal detection using observed glucose rise
+
+It picks the most conservative relevant prediction and delivers Super Micro-Boluses (SMBs)
+for aggressive corrections. Trio also supports **Autosens** (24h sensitivity detection)
+and **Dynamic ISF** (BG-dependent sensitivity adjustments).
+
+---
+
+## Patient Model Explained
+
+The patient model introduces realistic sources of randomness that challenge the algorithm:
+
+- **Meal variation** — actual carbs consumed are drawn from a normal distribution around
+  the average, so a "50g lunch" might be 40g or 60g on any given day
+- **Carb counting error** — the patient's declaration to the pump differs from reality.
+  Sigma controls random error; bias controls systematic under-counting
+- **Absorption error** — declared absorption time may not match the actual rate
+- **Undeclared meals** — some meals are eaten but never entered, forcing the algorithm
+  to detect and react to unexpected BG rises
+- **Sensitivity variation** — daily insulin sensitivity varies lognormally. The algorithm
+  doesn't know today's true sensitivity, creating a "basal deficit" that drifts BG
+- **Exercise mismatch** — the patient tells the pump about exercise, but the actual
+  sensitivity change and duration differ from what was declared
+
+---
+
+## Reading the Results
+
+### Spaghetti Plot
+Each thin line is one simulated day. The thick line is the **median** across all days.
+The green band marks the target range (70-180 mg/dL). Tight bundles = consistent
+performance; wide spread = high variability.
+
+### Summary Statistics
+- **Mean BG** — average blood glucose across all paths
+- **TIR 70-180** — Time In Range: percentage of readings between 70-180 mg/dL (higher is better; clinical target >70%)
+- **Time <70 / <54** — time in hypoglycemia / severe hypoglycemia (lower is better; target <4% / <1%)
+- **Time >180 / >250** — time in hyperglycemia / severe hyperglycemia (lower is better; target <25%)
+- **CV** — Coefficient of Variation: glucose variability as a percentage (lower is better; target <36%)
+- **GMI** — Glucose Management Indicator: estimated A1C from mean glucose
+- **Hypo events/path** — average distinct hypoglycemia episodes (3+ consecutive readings below 70)
+
+### Head-to-Head
+When exactly 2 algorithms are selected, each paired path is compared: which had higher TIR,
+which had less time below 70. This controls for randomness — both algorithms face the
+exact same patient on each path.
+
+---
+
+## Glossary
+
+| Term | Meaning |
+|------|---------|
+| **ISF** | Insulin Sensitivity Factor — how much 1U of insulin lowers BG (mg/dL per unit) |
+| **CR** | Carb Ratio — grams of carbs covered by 1U of insulin |
+| **DIA** | Duration of Insulin Action — how long insulin stays active (hours) |
+| **IOB** | Insulin on Board — active insulin remaining from recent deliveries |
+| **COB** | Carbs on Board — carbs still being absorbed |
+| **TIR** | Time in Range — % of readings between 70-180 mg/dL |
+| **GMI** | Glucose Management Indicator — estimated A1C from average glucose |
+| **CV** | Coefficient of Variation — measure of glucose variability |
+| **IRC** | Integral Retrospective Correction — Loop's error correction feedback loop |
+| **DCA** | Dynamic Carb Absorption — Loop's real-time carb absorption tracking |
+| **ICE** | Insulin Counteraction Effects — observed BG change not explained by insulin |
+| **SMB** | Super Micro-Bolus — Trio's small correction boluses delivered every few minutes |
+| **UAM** | Unannounced Meal — Trio's detection of unexplained glucose rise |
+| **Autosens** | Automatic Sensitivity — Trio's 24h rolling sensitivity detection |
+
+---
+
+*For a detailed technical description of the algorithms and patient model, see
+[docs/technical_guide.md](docs/technical_guide.md).*
+""")

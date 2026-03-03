@@ -17,7 +17,6 @@ outputs/
 
 # Dev archive and internal notes
 _dev/
-docs/
 
 # External dependencies
 Trio/
