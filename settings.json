@@ -7,7 +7,7 @@
   "suspend_threshold": 80.0,
   "max_basal_rate": 2.8,
   "max_bolus": 3.0,
-  "insulin_type": "fiasp",
+  "insulin_type": "rapid_acting_adult",
   "enable_irc": true,
   "enable_momentum": true,
   "enable_dca": true

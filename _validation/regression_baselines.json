@@ -50,103 +50,103 @@
     "irc_impact": 65.3743
   },
   "01_flat_bg": {
-    "eventual_bg": 117.9132,
-    "momentum_impact": 0.3318,
-    "irc_impact": 0.436
+    "eventual_bg": 116.0782,
+    "momentum_impact": 0.4646,
+    "irc_impact": 0.5631
   },
   "02_rising_1mg_min": {
-    "eventual_bg": 136.4324,
-    "momentum_impact": 6.6159,
-    "irc_impact": 13.4144
+    "eventual_bg": 134.7538,
+    "momentum_impact": 6.733,
+    "irc_impact": 13.6243
   },
   "03_rising_2mg_min": {
-    "eventual_bg": 174.5204,
-    "momentum_impact": 12.9811,
-    "irc_impact": 26.1424
+    "eventual_bg": 172.8419,
+    "momentum_impact": 13.0982,
+    "irc_impact": 26.3523
   },
   "04_falling_1mg_min": {
-    "eventual_bg": 82.1946,
-    "momentum_impact": -3.5841,
-    "irc_impact": -20.1032
+    "eventual_bg": 80.6508,
+    "momentum_impact": -3.5093,
+    "irc_impact": -19.7586
   },
   "08_rising_bg_with_insulin": {
-    "eventual_bg": 128.4253,
-    "momentum_impact": 6.6383,
-    "irc_impact": 12.7565
+    "eventual_bg": 128.2915,
+    "momentum_impact": 6.5312,
+    "irc_impact": 12.7446
   },
   "18_high_bg_steady": {
-    "eventual_bg": 248.3443,
-    "momentum_impact": 0.2508,
-    "irc_impact": 0.6864
+    "eventual_bg": 246.6657,
+    "momentum_impact": 0.3679,
+    "irc_impact": 0.8963
   },
   "10_future_carbs": {
-    "eventual_bg": 588.8189,
-    "momentum_impact": -7.3666,
-    "irc_impact": -0.6911
+    "eventual_bg": 587.0502,
+    "momentum_impact": -7.2382,
+    "irc_impact": -0.5714
   },
   "17_low_bg": {
-    "eventual_bg": 53.1946,
-    "momentum_impact": -2.6377,
-    "irc_impact": -12.4513
+    "eventual_bg": 51.6508,
+    "momentum_impact": -2.563,
+    "irc_impact": -12.1066
   },
   "06_carbs_only": {
-    "eventual_bg": 272.7884,
-    "momentum_impact": -9.4476,
-    "irc_impact": -31.2186
+    "eventual_bg": 271.1611,
+    "momentum_impact": -9.3618,
+    "irc_impact": -30.9575
   },
   "14_falling_fast": {
-    "eventual_bg": 61.7136,
-    "momentum_impact": 0.6087,
-    "irc_impact": -13.2025
+    "eventual_bg": 44.2855,
+    "momentum_impact": -0.1182,
+    "irc_impact": -20.9579
   },
   "05_insulin_only": {
-    "eventual_bg": 59.2793,
-    "momentum_impact": 7.333,
-    "irc_impact": 46.8709
+    "eventual_bg": 24.6861,
+    "momentum_impact": 6.142,
+    "irc_impact": 31.6231
   },
   "09_large_insulin": {
-    "eventual_bg": -54.1337,
-    "momentum_impact": 12.8387,
-    "irc_impact": 14.0134
+    "eventual_bg": -71.293,
+    "momentum_impact": 8.5248,
+    "irc_impact": 8.5673
   },
   "12_multiple_insulin": {
-    "eventual_bg": -125.878,
-    "momentum_impact": 18.3314,
-    "irc_impact": 26.1726
+    "eventual_bg": -169.9732,
+    "momentum_impact": 14.4695,
+    "irc_impact": 20.876
   },
   "19_correction_in_progress": {
-    "eventual_bg": -20.5745,
-    "momentum_impact": 10.6716,
-    "irc_impact": 18.0463
+    "eventual_bg": -54.4137,
+    "momentum_impact": 7.9401,
+    "irc_impact": 5.0609
   },
   "13_rising_despite_insulin": {
-    "eventual_bg": 76.7527,
-    "momentum_impact": 9.8722,
-    "irc_impact": 66.2002
+    "eventual_bg": 41.8965,
+    "momentum_impact": 8.4183,
+    "irc_impact": 50.6894
   },
   "07_carbs_and_insulin": {
-    "eventual_bg": 112.2935,
-    "momentum_impact": -7.1435,
-    "irc_impact": -4.8659
+    "eventual_bg": 104.7513,
+    "momentum_impact": -4.4186,
+    "irc_impact": -9.318
   },
   "15_meal_scenario": {
-    "eventual_bg": 103.8302,
-    "momentum_impact": -7.5109,
-    "irc_impact": -7.0519
+    "eventual_bg": 97.8279,
+    "momentum_impact": -10.7233,
+    "irc_impact": -7.2692
   },
   "20_post_meal_future_carbs": {
-    "eventual_bg": 103.6396,
-    "momentum_impact": -1.1956,
-    "irc_impact": -3.7411
+    "eventual_bg": 98.1115,
+    "momentum_impact": -4.5979,
+    "irc_impact": -3.8426
   },
   "11_multiple_carbs": {
-    "eventual_bg": 422.8436,
-    "momentum_impact": -16.1772,
-    "irc_impact": -42.5879
+    "eventual_bg": 421.2163,
+    "momentum_impact": -16.0913,
+    "irc_impact": -42.3268
   },
   "16_multi_carb_meal": {
-    "eventual_bg": 86.6735,
-    "momentum_impact": -18.2435,
-    "irc_impact": -11.7496
+    "eventual_bg": 75.7403,
+    "momentum_impact": -21.3382,
+    "irc_impact": -12.0245
   }
 }
