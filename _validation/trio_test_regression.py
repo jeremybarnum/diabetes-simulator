@@ -33,7 +33,12 @@ BASELINES_FILE = Path(__file__).parent / "trio_regression_baselines.json"
 
 # Tests that have been validated against JS ground truth
 # Tolerance: the Python result must match JS within this tolerance
-JS_VALIDATED: Set[str] = set()  # Will be populated as tests pass
+# Last validated: 2026-03-03 (run_python_trio rewrite using direct pipeline)
+JS_VALIDATED: Set[str] = {
+    "04_rising_with_cob",       # +0 mg/dL eventualBG diff
+    "07_going_low",             # +1 mg/dL eventualBG diff
+    "08_multiple_carbs",        # +0 mg/dL eventualBG diff
+}
 
 # Default tolerance for eventualBG comparison
 TOLERANCE = 1.0  # mg/dL

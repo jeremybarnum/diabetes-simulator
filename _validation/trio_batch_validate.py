@@ -24,8 +24,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from trio_runner import TrioRunner, TrioComparison
 from trio_json_exporter import TrioJSONExporter
-from algorithms.openaps.openaps_algorithm import OpenAPSAlgorithm
-from algorithms.base import AlgorithmInput
+from algorithms.openaps.iob import generate_iob_array
+from algorithms.openaps.cob import recent_carbs
+from algorithms.openaps.glucose_stats import get_last_glucose
+from algorithms.openaps.determine_basal import determine_basal
 
 
 # Fixed reference time for deterministic results
@@ -225,53 +227,88 @@ def run_js_trio(scenario: Dict, exporter: TrioJSONExporter,
 
 
 def run_python_trio(scenario: Dict, settings: Dict) -> Optional[Dict]:
-    """Run scenario through Python OpenAPS implementation."""
+    """Run scenario through Python OpenAPS implementation.
+
+    Uses the same direct pipeline as simulation.py's get_trio_recommendation():
+    generate_iob_array → recent_carbs → get_last_glucose → determine_basal.
+    """
     try:
-        # Convert scenario to AlgorithmInput
+        exporter = TrioJSONExporter(settings)
+
         glucose_samples = sorted(scenario['glucoseSamples'], key=lambda x: x['timestamp'])
         most_recent = glucose_samples[-1]
         current_bg = most_recent['value']
         current_time_unix = most_recent['timestamp']
+        now_ms = int(current_time_unix * 1000)
 
-        # Convert to minutes (relative to epoch, like Loop does)
-        current_time_min = current_time_unix / 60.0
+        profile = exporter.build_profile(int(current_time_unix))
+        if 'max_iob' not in profile or profile['max_iob'] is None:
+            profile['max_iob'] = 3.5
 
-        # CGM history as (minutes, glucose) tuples
-        cgm_history = [(s['timestamp'] / 60.0, s['value']) for s in glucose_samples]
+        # Build pump history (boluses as ISO-timestamped dicts)
+        pump_history = []
+        for d in scenario.get('insulinDoses', []):
+            iso = datetime.fromtimestamp(d['timestamp'], tz=timezone.utc).strftime(
+                '%Y-%m-%dT%H:%M:%S.000Z')
+            pump_history.append({'_type': 'Bolus', 'timestamp': iso, 'amount': d['units']})
 
-        # Bolus history as (minutes, units) tuples
-        bolus_history = [
-            (d['timestamp'] / 60.0, d['units'])
-            for d in scenario.get('insulinDoses', [])
-        ]
+        # Build glucose data (reverse-chronological dicts)
+        glucose_data = []
+        for s in glucose_samples:
+            glucose_data.append({
+                'glucose': s['value'], 'sgv': s['value'],
+                'date': int(s['timestamp'] * 1000),
+                'dateString': datetime.fromtimestamp(
+                    s['timestamp'], tz=timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z'),
+            })
+        glucose_data.sort(key=lambda x: x['date'], reverse=True)
 
-        # Carb entries as (minutes, grams, absorption_hours) tuples
-        carb_entries = [
-            (c['timestamp'] / 60.0, c['grams'], c.get('absorptionHours', 3.0))
-            for c in scenario.get('carbEntries', [])
-        ]
+        # Build carb treatments
+        carb_treatments = []
+        for c in scenario.get('carbEntries', []):
+            iso = datetime.fromtimestamp(c['timestamp'], tz=timezone.utc).strftime(
+                '%Y-%m-%dT%H:%M:%S.000Z')
+            carb_treatments.append({
+                'carbs': c['grams'], 'nsCarbs': c['grams'],
+                'timestamp': iso, 'created_at': iso,
+            })
 
-        algo_input = AlgorithmInput(
-            cgm_reading=current_bg,
-            timestamp=int(current_time_min),
-            cgm_history=cgm_history,
-            current_basal=settings.get('basal_rate', 0.45),
-            bolus_history=bolus_history,
-            carb_entries=carb_entries,
-            settings=settings,
+        bp = exporter.build_basal_profile()
+        iob_array = generate_iob_array(pump_history, profile, now_ms)
+        iob_data = iob_array[0] if iob_array else {'iob': 0, 'activity': 0}
+
+        meal_data = recent_carbs(
+            treatments=carb_treatments, time_ms=now_ms, profile=profile,
+            glucose_data=glucose_data, pump_history=pump_history, basalprofile=bp,
         )
 
-        algo = OpenAPSAlgorithm(settings)
-        output = algo.recommend(algo_input)
+        glucose_status = get_last_glucose(glucose_data)
+        if not glucose_status:
+            glucose_status = {
+                'glucose': current_bg, 'delta': 0,
+                'short_avgdelta': 0, 'long_avgdelta': 0, 'date': now_ms,
+            }
+
+        result = determine_basal(
+            glucose_status=glucose_status,
+            currenttemp={'rate': 0, 'duration': 0},
+            iob_data=iob_data,
+            profile=profile,
+            meal_data=meal_data,
+            iob_array=iob_array,
+            micro_bolus_allowed=True,
+            clock_ms=now_ms,
+        )
 
         return {
-            'eventualBG': None,  # TODO: extract from output once implemented
-            'IOB': output.iob,
-            'COB': output.cob,
-            'rate': output.temp_basal_rate,
-            'duration': output.temp_basal_duration,
-            'reason': output.reason,
-            'predictions': output.glucose_predictions,
+            'eventualBG': result.get('eventualBG'),
+            'IOB': iob_data.get('iob', 0),
+            'COB': meal_data.get('mealCOB', 0) if meal_data else 0,
+            'rate': result.get('rate'),
+            'duration': result.get('duration'),
+            'units': result.get('units'),
+            'reason': result.get('reason', ''),
+            'predBGs': result.get('predBGs', {}),
         }
     except Exception as e:
         print(f"    Python error: {e}")
