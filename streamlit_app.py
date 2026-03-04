@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 
 from simulation import PatientProfile, MealSpec, ExerciseSpec, SimulationRun, SimulationRunResult
-from monte_carlo import compute_metrics, GlycemicMetrics, _algo_seed_offset
+from monte_carlo import compute_metrics, GlycemicMetrics, _algo_seed_offset, _profile_to_dict, build_variants
 
 try:
     import modal
@@ -295,6 +295,13 @@ selected_profile_name = st.sidebar.selectbox(
 )
 profile_path = profile_names[selected_profile_name]
 
+# Additional profiles for multi-profile comparison
+additional_profile_names = st.sidebar.multiselect(
+    "Additional Profiles to Compare",
+    [n for n in profile_names.keys() if n != selected_profile_name],
+    help="Select extra profiles to compare alongside the active profile above.",
+)
+
 # Load profile into session state on first run or profile change
 if st.session_state.get("loaded_profile") != profile_path:
     load_profile_to_state(profile_path)
@@ -336,17 +343,20 @@ run_button = st.sidebar.button("Run Simulation", type="primary", use_container_w
 
 # ─── Helper functions ────────────────────────────────────────────────────────
 
-def run_paths(profile, algorithm_name, n_paths, n_days, seed, progress_cb=None):
+def run_paths(profile, algorithm_name, n_paths, n_days, seed, progress_cb=None, seed_label=None):
     """Run n_paths simulations, return (traces_by_day, list of metrics).
 
     traces_by_day: list of lists. Each path produces n_days day-traces.
     Each day-trace is [(hours_in_day, bg), ...].
     progress_cb: optional callback(completed_count) called after each path.
+    seed_label: label used for seed offset (defaults to algorithm_name).
     """
+    if seed_label is None:
+        seed_label = algorithm_name
     all_day_traces = []
     all_metrics = []
     for i in range(n_paths):
-        path_seed = seed + i * 1000 + _algo_seed_offset(algorithm_name)
+        path_seed = seed + i * 1000 + _algo_seed_offset(seed_label)
         rng = np.random.RandomState(path_seed)
         sim = SimulationRun(profile=profile, algorithm_name=algorithm_name,
                             n_days=n_days, rng=rng)
@@ -366,34 +376,34 @@ def run_paths(profile, algorithm_name, n_paths, n_days, seed, progress_cb=None):
     return all_day_traces, all_metrics
 
 
-def run_paths_cloud(profile, algorithms, n_paths, n_days, seed, progress_cb=None):
-    """Run all paths on Modal cloud workers. Returns (traces_by_algo, metrics_by_algo).
+def run_paths_cloud(variants, n_paths, n_days, seed, progress_cb=None):
+    """Run all paths on Modal cloud workers. Returns (traces_by_variant, metrics_by_variant).
 
-    Each Modal worker runs one path for all algorithms. Results are collected
+    variants: list of (variant_label, profile_dict, algo_name) tuples from build_variants().
+    Each Modal worker runs one path for all variants. Results are collected
     and converted to the same format as run_paths().
     """
-    from monte_carlo import _profile_to_dict
     from monte_carlo_cloud import run_path_remote, app as modal_app
     from simulation import SimulationRunResult
 
-    profile_dict = _profile_to_dict(profile)
+    variant_labels = [v[0] for v in variants]
 
     args_list = []
     for i in range(n_paths):
         path_seed = seed + i * 1000
-        args_list.append((path_seed, profile_dict, algorithms, n_days))
+        args_list.append((path_seed, variants, n_days))
 
-    traces_by_algo = {name: [] for name in algorithms}
-    metrics_by_algo = {name: [] for name in algorithms}
+    traces_by_variant = {name: [] for name in variant_labels}
+    metrics_by_variant = {name: [] for name in variant_labels}
 
     completed = 0
     with modal_app.run():
         for result in run_path_remote.starmap(args_list, order_outputs=False):
-            for algo_name, data in result.items():
+            for variant_label, data in result.items():
                 metrics = data['metrics']
                 if isinstance(metrics, dict):
                     metrics = GlycemicMetrics(**metrics)
-                metrics_by_algo[algo_name].append(metrics)
+                metrics_by_variant[variant_label].append(metrics)
 
                 run_result = SimulationRunResult.from_dict(data['result'])
                 path_days = []
@@ -402,13 +412,13 @@ def run_paths_cloud(profile, algorithms, n_paths, n_days, seed, progress_cb=None
                     trace = [((t_rel - day_offset_min) / 60, bg)
                              for t_rel, bg in day.bg_trace]
                     path_days.append(trace)
-                traces_by_algo[algo_name].append(path_days)
+                traces_by_variant[variant_label].append(path_days)
 
             completed += 1
             if progress_cb:
                 progress_cb(completed / n_paths)
 
-    return traces_by_algo, metrics_by_algo
+    return traces_by_variant, metrics_by_variant
 
 
 def plot_spaghetti(traces_by_algo, algo_colors, n_paths, n_days):
@@ -437,7 +447,7 @@ def plot_spaghetti(traces_by_algo, algo_colors, n_paths, n_days):
                     bg_matrix.append(interp)
             if bg_matrix:
                 medians = np.median(np.array(bg_matrix), axis=0)
-                label = algo_name.replace("_", " ").upper()
+                label = _variant_display_name(algo_name)
                 suffix = f" ({len(flat_traces)} day-traces)"
                 ax.plot(common_hours, medians, color=color, linewidth=2.5,
                         label=f"{label} median{suffix}")
@@ -499,6 +509,30 @@ ALGO_COLORS = {
     "loop_ab_gbpa": "#0891b2",
     "trio": "#dc2626",
 }
+
+EXTENDED_COLORS = [
+    "#2563eb", "#dc2626", "#7c3aed", "#0891b2",
+    "#d97706", "#059669", "#e11d48", "#4f46e5",
+    "#0284c7", "#9333ea", "#c2410c", "#15803d",
+]
+
+
+def _variant_display_name(variant_label):
+    """Format variant label for display (e.g., 'loop_ab40/real_patient' -> 'LOOP AB40 / Real Patient')."""
+    if "/" in variant_label:
+        algo, profile = variant_label.split("/", 1)
+        return f"{algo.replace('_', ' ').upper()} / {profile.replace('_', ' ').title()}"
+    return variant_label.replace("_", " ").upper()
+
+
+def get_variant_colors(variant_labels):
+    """Assign distinct colors to variant labels."""
+    if all(label in ALGO_COLORS for label in variant_labels):
+        return {label: ALGO_COLORS[label] for label in variant_labels}
+    colors = {}
+    for i, label in enumerate(variant_labels):
+        colors[label] = EXTENDED_COLORS[i % len(EXTENDED_COLORS)]
+    return colors
 
 tab_results, tab_patient, tab_algo, tab_help = st.tabs([
     "Results", "Patient Model", "Algorithm & Therapy Settings", "Help",
@@ -881,15 +915,36 @@ with tab_results:
         else:
             profile = build_profile_from_state()
 
-            traces_by_algo = {}
-            metrics_by_algo = {}
+            # Build profile list for comparison
+            primary_label = Path(profile_path).stem
+            profile_objs = [(primary_label, profile)]
+            for name in additional_profile_names:
+                p = PatientProfile.from_json(profile_names[name])
+                profile_objs.append((Path(profile_names[name]).stem, p))
+
+            n_prof = len(profile_objs)
+            multi_profile = n_prof > 1
+
+            # Build variant tuples: (variant_label, profile_obj, algo_name)
+            variants_local = []
+            for algo_name in algorithms:
+                for plabel, pobj in profile_objs:
+                    vlabel = algo_name if not multi_profile else f"{algo_name}/{plabel}"
+                    variants_local.append((vlabel, pobj, algo_name))
+            variant_labels = [v[0] for v in variants_local]
+
+            traces_by_variant = {}
+            metrics_by_variant = {}
 
             import time as _time
-            algo_labels = [a.replace("_", " ").upper() for a in algorithms]
-            algo_summary = " vs ".join(algo_labels)
+            if len(variant_labels) <= 3:
+                variant_summary = " vs ".join(
+                    _variant_display_name(vl) for vl in variant_labels)
+            else:
+                variant_summary = f"{len(variant_labels)} variants"
             total_work = f"{n_paths} paths x {n_days} days"
 
-            progress = st.progress(0, text=f"Starting {algo_summary} — {total_work}...")
+            progress = st.progress(0, text=f"Starting {variant_summary} — {total_work}...")
             t_start = _time.time()
 
             def _eta_str(elapsed, frac):
@@ -904,7 +959,12 @@ with tab_results:
             if MODAL_AVAILABLE and n_paths > 1:
                 try:
                     progress.progress(
-                        0, text=f"Connecting to Modal Cloud — {algo_summary}, {total_work}...")
+                        0, text=f"Connecting to Modal Cloud — {variant_summary}, {total_work}...")
+
+                    # Build cloud variants (serialized profile dicts)
+                    profile_dicts = [(label, _profile_to_dict(p))
+                                     for label, p in profile_objs]
+                    cloud_variants = build_variants(algorithms, profile_dicts)
 
                     def update_progress(frac):
                         done = int(frac * n_paths)
@@ -918,8 +978,8 @@ with tab_results:
                                 text=f"Cloud: {done}/{n_paths} paths — "
                                      f"{elapsed:.0f}s elapsed, {eta}")
 
-                    traces_by_algo, metrics_by_algo = run_paths_cloud(
-                        profile, algorithms, n_paths, n_days, seed,
+                    traces_by_variant, metrics_by_variant = run_paths_cloud(
+                        cloud_variants, n_paths, n_days, seed,
                         progress_cb=update_progress)
                     cloud_success = True
                 except Exception as e:
@@ -927,13 +987,13 @@ with tab_results:
                     t_start = _time.time()
 
             if not cloud_success:
-                total_paths = len(algorithms) * n_paths
+                total_paths = len(variants_local) * n_paths
                 paths_done = 0
 
-                for i, algo_name in enumerate(algorithms):
-                    label = algo_name.replace("_", " ").upper()
+                for vlabel, pobj, algo_name in variants_local:
+                    display = _variant_display_name(vlabel)
 
-                    def local_progress_cb(path_count, _label=label, _offset=paths_done):
+                    def local_progress_cb(path_count, _label=display, _offset=paths_done):
                         done = _offset + path_count
                         frac = done / total_paths
                         elapsed = _time.time() - t_start
@@ -944,42 +1004,45 @@ with tab_results:
                                  f"{elapsed:.0f}s elapsed, {eta}")
 
                     progress.progress(paths_done / total_paths,
-                        text=f"{label}: starting ({paths_done}/{total_paths} total)...")
+                        text=f"{display}: starting ({paths_done}/{total_paths} total)...")
                     traces, metrics = run_paths(
-                        profile, algo_name, n_paths, n_days, seed,
-                        progress_cb=local_progress_cb)
-                    traces_by_algo[algo_name] = traces
-                    metrics_by_algo[algo_name] = metrics
+                        pobj, algo_name, n_paths, n_days, seed,
+                        progress_cb=local_progress_cb, seed_label=vlabel)
+                    traces_by_variant[vlabel] = traces
+                    metrics_by_variant[vlabel] = metrics
                     paths_done += n_paths
 
             elapsed_total = _time.time() - t_start
             where = "cloud" if cloud_success else "local"
             progress.progress(1.0,
-                text=f"Done — {algo_summary}, {total_work} in {elapsed_total:.1f}s ({where})")
+                text=f"Done — {variant_summary}, {total_work} in {elapsed_total:.1f}s ({where})")
+
+            # Assign colors
+            variant_colors = get_variant_colors(variant_labels)
 
             # Spaghetti plot
             st.subheader("BG Traces")
-            fig = plot_spaghetti(traces_by_algo, ALGO_COLORS, n_paths, n_days)
+            fig = plot_spaghetti(traces_by_variant, variant_colors, n_paths, n_days)
             st.pyplot(fig)
             plt.close(fig)
 
             # Summary stats table
             st.subheader("Summary Statistics")
-            cols = st.columns(len(algorithms))
-            for col, algo_name in zip(cols, algorithms):
+            cols = st.columns(len(variant_labels))
+            for col, vlabel in zip(cols, variant_labels):
                 with col:
-                    label = algo_name.replace("_", " ").upper()
-                    st.markdown(f"**{label}**")
-                    stats = compute_summary_stats(metrics_by_algo[algo_name])
+                    display = _variant_display_name(vlabel)
+                    st.markdown(f"**{display}**")
+                    stats = compute_summary_stats(metrics_by_variant[vlabel])
                     for metric, value in stats.items():
                         st.metric(metric, value)
 
-            # Head-to-head (if exactly 2 algorithms)
-            if len(algorithms) == 2:
+            # Head-to-head (if exactly 2 variants)
+            if len(variant_labels) == 2:
                 st.subheader("Head-to-Head")
-                a, b = algorithms
-                ma = metrics_by_algo[a]
-                mb = metrics_by_algo[b]
+                a, b = variant_labels
+                ma = metrics_by_variant[a]
+                mb = metrics_by_variant[b]
                 n = min(len(ma), len(mb))
 
                 tir_a_wins = sum(1 for x, y in zip(ma[:n], mb[:n])
@@ -991,8 +1054,8 @@ with tab_results:
                 hypo_b_wins = sum(1 for x, y in zip(ma[:n], mb[:n])
                                   if y.time_below_70 < x.time_below_70)
 
-                a_label = a.replace("_", " ").upper()
-                b_label = b.replace("_", " ").upper()
+                a_label = _variant_display_name(a)
+                b_label = _variant_display_name(b)
                 col1, col2 = st.columns(2)
                 with col1:
                     st.markdown(f"**Higher TIR**: {a_label} wins {tir_a_wins}, "
