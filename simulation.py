@@ -88,7 +88,7 @@ class PatientProfile:
     rescue_carbs_grams: float = 8.0   # grams per rescue dose
     rescue_absorption_hrs: float = 1.0  # absorption time
     rescue_cooldown_min: float = 15.0   # minutes between doses
-    rescue_carbs_declared: bool = False  # whether patient tells pump about rescue carbs
+    rescue_carbs_declared_pct: float = 0.0  # fraction of rescue carbs declared (0.0=none, 1.0=all)
 
     # Algorithm settings (pump programming) — loaded from settings.json if None
     algorithm_settings: Optional[Dict] = None
@@ -128,7 +128,8 @@ class PatientProfile:
             rescue_carbs_grams=data.get('rescue_carbs_grams', 8.0),
             rescue_absorption_hrs=data.get('rescue_absorption_hrs', 1.0),
             rescue_cooldown_min=data.get('rescue_cooldown_min', 15.0),
-            rescue_carbs_declared=data.get('rescue_carbs_declared', False),
+            rescue_carbs_declared_pct=data.get('rescue_carbs_declared_pct',
+                                              1.0 if data.get('rescue_carbs_declared') else 0.0),
             algorithm_settings=settings,
         )
 
@@ -592,8 +593,10 @@ class SimulationRun:
                 grams = self.profile.rescue_carbs_grams
                 absorption_hrs = self.profile.rescue_absorption_hrs
                 actual_carbs.append((current_time, grams, absorption_hrs))
-                if self.profile.rescue_carbs_declared:
-                    declared_carbs.append((current_time, grams, absorption_hrs))
+                declared_pct = self.profile.rescue_carbs_declared_pct
+                if declared_pct > 0:
+                    declared_grams = grams * declared_pct
+                    declared_carbs.append((current_time, declared_grams, absorption_hrs))
                 last_rescue_time = current_time
                 day_results[-1].rescue_carb_events += 1
                 day_results[-1].rescue_carb_grams_total += grams

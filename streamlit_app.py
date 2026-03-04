@@ -83,7 +83,7 @@ def save_profile_to_json(file_path: str):
         "rescue_carbs_grams": profile.rescue_carbs_grams,
         "rescue_absorption_hrs": profile.rescue_absorption_hrs,
         "rescue_cooldown_min": profile.rescue_cooldown_min,
-        "rescue_carbs_declared": profile.rescue_carbs_declared,
+        "rescue_carbs_declared_pct": profile.rescue_carbs_declared_pct,
     }
     if profile.exercise_spec:
         ex = profile.exercise_spec
@@ -191,7 +191,7 @@ def load_profile_to_state(profile_path: str):
     st.session_state["rescue_grams_sl"] = float(profile.rescue_carbs_grams)
     st.session_state["rescue_absorption_sl"] = float(profile.rescue_absorption_hrs)
     st.session_state["rescue_cooldown_sl"] = float(profile.rescue_cooldown_min)
-    st.session_state["rescue_declared_cb"] = bool(profile.rescue_carbs_declared)
+    st.session_state["rescue_declared_pct_sl"] = int(profile.rescue_carbs_declared_pct * 100)
 
     st.session_state["loaded_profile"] = profile_path
 
@@ -276,7 +276,7 @@ def build_profile_from_state() -> PatientProfile:
         rescue_carbs_grams=st.session_state.get("rescue_grams_sl", 8.0),
         rescue_absorption_hrs=st.session_state.get("rescue_absorption_sl", 1.0),
         rescue_cooldown_min=st.session_state.get("rescue_cooldown_sl", 15.0),
-        rescue_carbs_declared=st.session_state.get("rescue_declared_cb", False),
+        rescue_carbs_declared_pct=st.session_state.get("rescue_declared_pct_sl", 0) / 100.0,
         algorithm_settings=algo_settings,
     )
 
@@ -686,12 +686,12 @@ with tab_patient:
                 key="rescue_cooldown_sl",
                 help="Minimum wait before another rescue dose.",
             )
-        st.checkbox(
-            "Declare rescue carbs to algorithm",
-            key="rescue_declared_cb",
-            help="If checked, rescue carbs are entered into the pump (no bolus). "
-                 "The algorithm sees the COB and may reduce insulin delivery. "
-                 "If unchecked, rescue carbs are invisible to the algorithm.",
+        st.slider(
+            "% of rescue carbs declared",
+            min_value=0, max_value=100, step=10,
+            key="rescue_declared_pct_sl",
+            help="What percentage of rescue carbs the patient enters into the pump. "
+                 "0% = invisible to algorithm, 100% = fully declared.",
         )
 
     st.divider()

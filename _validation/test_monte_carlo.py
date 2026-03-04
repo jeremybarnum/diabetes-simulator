@@ -48,7 +48,7 @@ def make_base_profile(**overrides):
         rescue_threshold=65.0,
         rescue_carbs_grams=8.0,
         rescue_cooldown_min=15.0,
-        rescue_carbs_declared=False,
+        rescue_carbs_declared_pct=0.0,
     )
     defaults.update(overrides)
     return PatientProfile(**defaults)

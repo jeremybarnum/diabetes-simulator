@@ -175,7 +175,8 @@ def _profile_from_dict(d: Dict) -> PatientProfile:
         rescue_carbs_grams=d.get('rescue_carbs_grams', 8.0),
         rescue_absorption_hrs=d.get('rescue_absorption_hrs', 1.0),
         rescue_cooldown_min=d.get('rescue_cooldown_min', 15.0),
-        rescue_carbs_declared=d.get('rescue_carbs_declared', False),
+        rescue_carbs_declared_pct=d.get('rescue_carbs_declared_pct',
+                                          1.0 if d.get('rescue_carbs_declared') else 0.0),
         algorithm_settings=d.get('algorithm_settings'),
     )
 
@@ -216,7 +217,7 @@ def _profile_to_dict(p: PatientProfile) -> Dict:
         'rescue_carbs_grams': p.rescue_carbs_grams,
         'rescue_absorption_hrs': p.rescue_absorption_hrs,
         'rescue_cooldown_min': p.rescue_cooldown_min,
-        'rescue_carbs_declared': p.rescue_carbs_declared,
+        'rescue_carbs_declared_pct': p.rescue_carbs_declared_pct,
         'algorithm_settings': p.get_settings(),
     }
 
