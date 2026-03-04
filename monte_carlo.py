@@ -15,7 +15,7 @@ import time
 import json
 import numpy as np
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
@@ -120,22 +120,60 @@ def _algo_seed_offset(algo_name: str) -> int:
     return int(hashlib.md5(algo_name.encode()).hexdigest(), 16) % (2**31)
 
 
+# ─── Variant Labels ──────────────────────────────────────────────────────────
+
+def _variant_label(algo_name: str, profile_label: str, n_profiles: int) -> str:
+    """Build a variant label encoding (algorithm, profile).
+
+    When there's only one profile, returns just the algo name (backward compat).
+    With multiple profiles, returns 'algo_name/profile_label'.
+    """
+    if n_profiles <= 1:
+        return algo_name
+    return f"{algo_name}/{profile_label}"
+
+
+def build_variants(
+    algorithms: List[str],
+    profiles: List[Tuple[str, Dict]],
+) -> List[Tuple[str, Dict, str]]:
+    """Build list of (variant_label, profile_dict, algo_name) tuples."""
+    n_profiles = len(profiles)
+    variants = []
+    for algo_name in algorithms:
+        for profile_label, profile_dict in profiles:
+            label = _variant_label(algo_name, profile_label, n_profiles)
+            variants.append((label, profile_dict, algo_name))
+    return variants
+
+
 # ─── Single Path Runner (top-level for pickling) ─────────────────────────────
 
 def _run_single_path(args) -> Dict[str, dict]:
-    """Run one path for all algorithms. Must be top-level for multiprocessing.
+    """Run one path for all variants. Must be top-level for multiprocessing.
 
-    Returns dict mapping algo_name -> {'metrics': GlycemicMetrics, 'result': dict}
-    where result is the serialized SimulationRunResult.
+    Accepts two formats for backward compatibility:
+    - New: (path_seed, variants, n_days)
+      where variants is [(variant_label, profile_dict, algo_name), ...]
+    - Legacy: (path_seed, profile_dict, algorithms, n_days)
+
+    Returns dict mapping variant_label -> {'metrics': GlycemicMetrics, 'result': dict}
     """
-    path_seed, profile_dict, algorithms, n_days = args
-
-    # Reconstruct profile from dict
-    profile = _profile_from_dict(profile_dict)
+    # Detect format: new has 3 elements, legacy has 4
+    if len(args) == 3:
+        path_seed, variants, n_days = args
+    else:
+        # Legacy format
+        path_seed, profile_dict, algorithms, n_days = args
+        variants = [(algo, profile_dict, algo) for algo in algorithms]
 
     results = {}
-    for algo_name in algorithms:
-        rng = np.random.RandomState(path_seed + _algo_seed_offset(algo_name))
+    for variant_label, profile_dict, algo_name in variants:
+        profile = _profile_from_dict(profile_dict)
+        # Use algo_name for seeding when it equals the variant label (single profile),
+        # otherwise use variant_label (multi-profile)
+        seed_key = algo_name if variant_label == algo_name else variant_label
+        rng = np.random.RandomState(path_seed + _algo_seed_offset(seed_key))
         sim = SimulationRun(
             profile=profile,
             algorithm_name=algo_name,
@@ -143,7 +181,7 @@ def _run_single_path(args) -> Dict[str, dict]:
             rng=rng,
         )
         run_result = sim.run()
-        results[algo_name] = {
+        results[variant_label] = {
             'metrics': compute_metrics(run_result),
             'result': run_result.to_dict(),
         }
@@ -263,32 +301,42 @@ def run_monte_carlo(
     n_days: int = 7,
     seed: int = 42,
     max_workers: int = 1,
+    profiles: Optional[List[Tuple[str, PatientProfile]]] = None,
 ) -> Dict[str, MonteCarloResults]:
     """
     Run Monte Carlo comparison of algorithms.
 
     Args:
-        profile: Patient profile configuration
+        profile: Patient profile configuration (used when profiles is None)
         algorithms: List of algorithm names (e.g., ['loop_ab40', 'trio'])
         n_paths: Number of simulation paths
         n_days: Days per path
         seed: Base random seed
         max_workers: Number of parallel workers (1 = sequential)
+        profiles: Optional list of (label, PatientProfile) pairs for multi-profile comparison.
+                  When provided, overrides the single `profile` arg.
 
     Returns:
-        Dict mapping algorithm name to MonteCarloResults
+        Dict mapping variant label to MonteCarloResults
     """
-    profile_dict = _profile_to_dict(profile)
+    # Build profile list
+    if profiles is None:
+        profile_pairs = [("default", _profile_to_dict(profile))]
+    else:
+        profile_pairs = [(label, _profile_to_dict(p)) for label, p in profiles]
+
+    variants = build_variants(algorithms, profile_pairs)
+    variant_labels = [v[0] for v in variants]
 
     # Prepare per-path args
     path_args = []
     for i in range(n_paths):
         path_seed = seed + i * 1000
-        path_args.append((path_seed, profile_dict, algorithms, n_days))
+        path_args.append((path_seed, variants, n_days))
 
     # Collect results
-    mc_results = {name: MonteCarloResults(name, n_paths, n_days)
-                  for name in algorithms}
+    mc_results = {label: MonteCarloResults(label, n_paths, n_days)
+                  for label in variant_labels}
 
     t_start = time.time()
 
@@ -428,6 +476,16 @@ def default_profile() -> PatientProfile:
     )
 
 
+def _load_profiles(args) -> Optional[List[Tuple[str, PatientProfile]]]:
+    """Load profile list from CLI args. Returns None for single-profile mode."""
+    if hasattr(args, 'profiles') and args.profiles:
+        profile_paths = [p.strip() for p in args.profiles.split(',')]
+        return [(Path(p).stem, PatientProfile.from_json(p)) for p in profile_paths]
+    if args.profile:
+        return [(Path(args.profile).stem, PatientProfile.from_json(args.profile))]
+    return None
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description='Monte Carlo algorithm comparison')
@@ -438,20 +496,25 @@ def main():
     parser.add_argument('--algorithms', nargs='+', default=['loop_ab40', 'trio'],
                         help='Algorithms to compare')
     parser.add_argument('--profile', type=str, default=None,
-                        help='Path to patient profile JSON')
+                        help='Path to patient profile JSON (single profile)')
+    parser.add_argument('--profiles', type=str, default=None,
+                        help='Comma-separated profile JSON paths for multi-profile comparison')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed')
     parser.add_argument('--workers', type=int, default=1,
                         help='Parallel workers (1=sequential)')
     args = parser.parse_args()
 
-    if args.profile:
-        profile = PatientProfile.from_json(args.profile)
+    profiles_list = _load_profiles(args)
+    if profiles_list:
+        profile = profiles_list[0][1]  # for display only
     else:
         profile = default_profile()
 
     print(f"Monte Carlo: {args.paths} paths x {args.days} days")
     print(f"Algorithms: {', '.join(args.algorithms)}")
+    if profiles_list and len(profiles_list) > 1:
+        print(f"Profiles: {', '.join(label for label, _ in profiles_list)}")
     print(f"Sensitivity sigma: {profile.sensitivity_sigma}")
     print(f"Carb count sigma: {profile.carb_count_sigma}")
     print(f"Meals/day: {len(profile.meals)}")
@@ -464,20 +527,20 @@ def main():
         n_days=args.days,
         seed=args.seed,
         max_workers=args.workers,
+        profiles=profiles_list,
     )
 
     print_comparison(results)
 
     # Auto-save results
-    for algo_name, mc in results.items():
-        profile_label = Path(args.profile).stem if args.profile else 'default'
-        label = f'{algo_name}_{args.paths}paths_{args.days}d_{profile_label}_s{args.seed}'
+    for variant_label, mc in results.items():
+        safe_label = variant_label.replace('/', '_')
+        label = f'{safe_label}_{args.paths}paths_{args.days}d_s{args.seed}'
         metadata = {
-            'algorithm': algo_name,
+            'variant': variant_label,
             'n_paths': args.paths,
             'n_days': args.days,
             'seed': args.seed,
-            'profile': args.profile or 'default',
         }
         save_batch_results(mc.all_run_results, label, metadata)
 

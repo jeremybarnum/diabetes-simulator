@@ -42,12 +42,12 @@ image = (
 
 
 @app.function(image=image, cpu=1.0, memory=512, timeout=600, retries=1)
-def run_path_remote(path_seed, profile_dict, algorithms, n_days):
+def run_path_remote(path_seed, variants, n_days):
     """Run a single Monte Carlo path on a remote worker."""
     import sys
     sys.path.insert(0, "/root/project")
     from monte_carlo import _run_single_path
-    return _run_single_path((path_seed, profile_dict, algorithms, n_days))
+    return _run_single_path((path_seed, variants, n_days))
 
 
 @app.local_entrypoint()
@@ -56,37 +56,51 @@ def main(
     days: int = 1,
     algorithms: str = "loop_ab40,trio",
     profile: str = "",
+    profiles: str = "",
     seed: int = 42,
 ):
     import time
     from pathlib import Path
     from monte_carlo import (
-        _profile_to_dict, default_profile, MonteCarloResults,
+        _profile_to_dict, default_profile, build_variants, MonteCarloResults,
         print_comparison,
     )
     from simulation import PatientProfile, SimulationRunResult, save_batch_results
 
     algo_list = [a.strip() for a in algorithms.split(",")]
 
-    if profile:
+    # Build profile list: --profiles takes precedence over --profile
+    if profiles:
+        profile_paths = [p.strip() for p in profiles.split(",")]
+        profile_pairs = [
+            (Path(p).stem, _profile_to_dict(PatientProfile.from_json(p)))
+            for p in profile_paths
+        ]
+    elif profile:
         p = PatientProfile.from_json(profile)
+        profile_pairs = [(Path(profile).stem, _profile_to_dict(p))]
     else:
-        p = default_profile()
+        profile_pairs = [("default", _profile_to_dict(default_profile()))]
 
-    profile_dict = _profile_to_dict(p)
+    variants = build_variants(algo_list, profile_pairs)
+    variant_labels = [v[0] for v in variants]
 
     # Build per-path argument tuples (same seeding as local runner)
     args_list = []
     for i in range(paths):
         path_seed = seed + i * 1000
-        args_list.append((path_seed, profile_dict, algo_list, days))
+        args_list.append((path_seed, variants, days))
 
     print(f"Monte Carlo Cloud: {paths} paths x {days} days")
     print(f"Algorithms: {', '.join(algo_list)}")
+    if len(profile_pairs) > 1:
+        print(f"Profiles: {', '.join(label for label, _ in profile_pairs)}")
+    print(f"Variants: {', '.join(variant_labels)}")
     print(f"Launching {paths} remote workers...")
     print()
 
-    mc_results = {name: MonteCarloResults(name, paths, days) for name in algo_list}
+    mc_results = {label: MonteCarloResults(label, paths, days)
+                  for label in variant_labels}
 
     t_start = time.time()
     completed = 0
@@ -101,9 +115,9 @@ def main(
             print(f"  ERROR: {result}")
             continue
 
-        for name, data in result.items():
-            mc_results[name].all_metrics.append(data["metrics"])
-            mc_results[name].all_run_results.append(
+        for label, data in result.items():
+            mc_results[label].all_metrics.append(data["metrics"])
+            mc_results[label].all_run_results.append(
                 SimulationRunResult.from_dict(data["result"])
             )
 
@@ -121,15 +135,14 @@ def main(
     print_comparison(mc_results)
 
     # Save results
-    for algo_name, mc in mc_results.items():
-        profile_label = Path(profile).stem if profile else "default"
-        label = f"{algo_name}_{paths}paths_{days}d_{profile_label}_s{seed}_cloud"
+    for variant_label, mc in mc_results.items():
+        safe_label = variant_label.replace("/", "_")
+        label = f"{safe_label}_{paths}paths_{days}d_s{seed}_cloud"
         metadata = {
-            "algorithm": algo_name,
+            "variant": variant_label,
             "n_paths": paths,
             "n_days": days,
             "seed": seed,
-            "profile": profile or "default",
             "runner": "modal_cloud",
         }
         save_batch_results(mc.all_run_results, label, metadata)

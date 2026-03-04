@@ -27,13 +27,12 @@ from algorithms.loop.insulin_models_exact import create_insulin_model, InsulinTy
 
 class SensitivityModel:
     """
-    Time-varying insulin sensitivity using daily shock + decay.
+    Persistent insulin sensitivity deviation.
 
-    Model:
-    - At 7:00am each day, draw morning_scalar ~ lognormal(0, sigma_day)
-    - 7am-9pm: S(t) = morning_scalar (constant during waking hours)
-    - 9pm-7am: S(t) decays exponentially toward 1.0 with half-life ~3 hours
-    - By next 7am, S(t) ≈ 1.0 + small residual, then new shock
+    Draws a single sensitivity scalar at construction time from
+    lognormal(0, sigma_day) and returns it for all time points. This models
+    a patient whose true sensitivity is consistently different from their
+    pump settings for the entire simulation run.
 
     The scalar represents the ratio of true insulin need to programmed insulin need.
     """
@@ -41,63 +40,30 @@ class SensitivityModel:
     def __init__(self, sigma_day: float = 0.15, rng: np.random.RandomState = None):
         """
         Args:
-            sigma_day: Lognormal sigma for daily sensitivity shock.
+            sigma_day: Lognormal sigma for sensitivity deviation.
                        0.15 gives typical range ~0.75-1.35.
             rng: Random state for reproducibility.
         """
         self.sigma_day = sigma_day
         self.rng = rng or np.random.RandomState()
 
-        # Pre-draw scalars for each day (up to 30 days)
-        self._daily_shocks: List[float] = []
-        self._decay_half_life_hrs = 3.0
-
-    def _ensure_day(self, day_index: int):
-        """Pre-generate shocks up through the requested day."""
-        while len(self._daily_shocks) <= day_index:
-            if self.sigma_day > 0:
-                shock = float(np.exp(self.rng.normal(0, self.sigma_day)))
-            else:
-                shock = 1.0
-            self._daily_shocks.append(shock)
+        if sigma_day > 0:
+            self._scalar = float(np.exp(self.rng.normal(0, self.sigma_day)))
+        else:
+            self._scalar = 1.0
 
     def get_scalar(self, t_minutes: float) -> float:
         """
-        Get sensitivity scalar at time t.
-
-        Args:
-            t_minutes: Time in minutes from simulation start.
-                       Day 0 starts at t=0 (7:00am).
+        Get sensitivity scalar (constant for all time points).
 
         Returns:
             S(t) sensitivity scalar.
         """
-        if self.sigma_day == 0:
-            return 1.0
-
-        # Each day is 1440 minutes. Day 0 starts at t=0 which is 7:00am.
-        day_index = int(t_minutes // 1440)
-        time_in_day = t_minutes % 1440  # minutes since 7am
-
-        self._ensure_day(day_index)
-        morning_scalar = self._daily_shocks[day_index]
-
-        # 7am-9pm (0-840 min into day): constant at morning_scalar
-        waking_end = 840  # 14 hours of waking = 840 min
-        if time_in_day <= waking_end:
-            return morning_scalar
-
-        # 9pm-7am (840-1440 min into day): exponential decay toward 1.0
-        hours_since_sleep = (time_in_day - waking_end) / 60.0
-        decay_rate = math.log(2) / self._decay_half_life_hrs
-        decay_factor = math.exp(-decay_rate * hours_since_sleep)
-
-        # Interpolate: morning_scalar -> 1.0 as decay_factor -> 0
-        return 1.0 + (morning_scalar - 1.0) * decay_factor
+        return self._scalar
 
     def get_daily_shocks(self) -> List[float]:
-        """Return the drawn daily shocks (for logging/debugging)."""
-        return list(self._daily_shocks)
+        """Return the persistent scalar (for logging/debugging)."""
+        return [self._scalar]
 
 
 @dataclass
