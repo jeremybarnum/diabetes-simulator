@@ -13,6 +13,7 @@ Usage:
     python3 test_monte_carlo.py --verbose  # Show metric values
 """
 
+import os
 import sys
 import time
 from pathlib import Path
@@ -28,6 +29,7 @@ ALGO = 'loop_ab40'
 N_PATHS = 20
 N_DAYS = 3
 SEED = 42
+MAX_WORKERS = os.cpu_count() or 4
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -62,6 +64,7 @@ def run_comparison(base_profile, modified_profile):
         n_paths=N_PATHS,
         n_days=N_DAYS,
         seed=SEED,
+        max_workers=MAX_WORKERS,
     )
     mod_results = run_monte_carlo(
         profile=modified_profile,
@@ -69,6 +72,7 @@ def run_comparison(base_profile, modified_profile):
         n_paths=N_PATHS,
         n_days=N_DAYS,
         seed=SEED,
+        max_workers=MAX_WORKERS,
     )
     return base_results[ALGO].summary(), mod_results[ALGO].summary()
 
@@ -123,11 +127,11 @@ def test_higher_carb_sigma_increases_tir_spread(verbose=False):
 
     base_results = run_monte_carlo(
         profile=base, algorithms=[ALGO],
-        n_paths=N_PATHS, n_days=N_DAYS, seed=SEED,
+        n_paths=N_PATHS, n_days=N_DAYS, seed=SEED, max_workers=MAX_WORKERS,
     )
     mod_results = run_monte_carlo(
         profile=modified, algorithms=[ALGO],
-        n_paths=N_PATHS, n_days=N_DAYS, seed=SEED,
+        n_paths=N_PATHS, n_days=N_DAYS, seed=SEED, max_workers=MAX_WORKERS,
     )
 
     base_sd = get_tir_sd(base_results[ALGO])
