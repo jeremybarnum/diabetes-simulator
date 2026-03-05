@@ -206,9 +206,9 @@ def extract_meal_pattern(
         else:
             n_other += 1
 
-        # Loop-era treatments have absorptionTime in seconds
-        absorption_sec = t.get("absorptionTime")
-        absorption_hrs = absorption_sec / 3600.0 if absorption_sec else None
+        # Loop-era treatments have absorptionTime in minutes
+        absorption_min = t.get("absorptionTime")
+        absorption_hrs = absorption_min / 60.0 if absorption_min else None
 
         carb_entries.append({
             "local_dt": local_dt,

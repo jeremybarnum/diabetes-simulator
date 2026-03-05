@@ -205,7 +205,7 @@ def analyze_carbs(treatments: List[Dict], n_days: int, utc_offset_hours: float =
         local_dt = dt + tz_offset
         date_str = local_dt.strftime("%Y-%m-%d")
         hour = local_dt.hour + local_dt.minute / 60.0
-        absorption = t.get("absorptionTime")  # in seconds (from Loop, None for Trio)
+        absorption = t.get("absorptionTime")  # in minutes (from Loop, None for Trio)
 
         daily_carbs[date_str].append({
             "hour": hour,
@@ -283,7 +283,7 @@ def analyze_carbs(treatments: List[Dict], n_days: int, utc_offset_hours: float =
     # --- Absorption times ---
     abs_times = [e["absorption_sec"] for e in all_entries if e.get("absorption_sec")]
     if abs_times:
-        abs_hrs = np.array(abs_times) / 3600
+        abs_hrs = np.array(abs_times) / 60  # absorptionTime is in minutes
         print(f"\nDeclared absorption times:")
         print(f"  Mean:   {np.mean(abs_hrs):.1f}h")
         print(f"  Median: {np.median(abs_hrs):.1f}h")
