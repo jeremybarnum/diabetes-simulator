@@ -6,6 +6,7 @@ Full UI for editing patient model and algorithm settings.
 """
 
 import json
+from datetime import datetime, timedelta
 import streamlit as st
 import numpy as np
 import pandas as pd
@@ -953,9 +954,19 @@ with tab_ns:
     col1, col2 = st.columns(2)
     with col1:
         ns_token = st.text_input("API Token (optional)", key="ns_token_in", type="password")
-        ns_days = st.number_input("Days of history", value=28, min_value=7, max_value=90, key="ns_days_in")
-    with col2:
         ns_profile_name = st.text_input("Save as profile name", value="ns_inferred", key="ns_name_in")
+    with col2:
+        ns_date_mode = st.radio("Date range", ["Last N days", "Custom range"], key="ns_date_mode", horizontal=True)
+        if ns_date_mode == "Last N days":
+            ns_days = st.number_input("Days of history", value=28, min_value=7, max_value=365, key="ns_days_in")
+            ns_start_date = None
+            ns_end_date = None
+        else:
+            from datetime import date as _date
+            today = _date.today()
+            ns_end_date = st.date_input("End date", value=today, key="ns_end_date")
+            ns_start_date = st.date_input("Start date", value=today - timedelta(days=28), key="ns_start_date")
+            ns_days = 28  # fallback, overridden by dates
 
     import_button = st.button("Import from Nightscout", type="primary")
 
@@ -974,8 +985,16 @@ with tab_ns:
             log_buffer = io.StringIO()
             with st.spinner("Fetching data from Nightscout..."):
                 try:
+                    from datetime import timezone as _tz
+                    _start = (datetime.combine(ns_start_date, datetime.min.time()).replace(tzinfo=_tz.utc)
+                              if ns_start_date else None)
+                    _end = (datetime.combine(ns_end_date, datetime.min.time()).replace(tzinfo=_tz.utc)
+                            if ns_end_date else None)
                     with contextlib.redirect_stdout(log_buffer):
-                        profile_dict = ns_build_profile(url, days=ns_days, token=token, output_path=save_path)
+                        profile_dict = ns_build_profile(
+                            url, days=ns_days, token=token, output_path=save_path,
+                            start_date=_start, end_date=_end,
+                        )
                 except Exception as e:
                     st.error(f"Import failed: {e}")
                     with st.expander("Full log"):

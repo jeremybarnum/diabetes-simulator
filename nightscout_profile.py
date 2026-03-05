@@ -8,6 +8,8 @@ compatible with the Monte Carlo simulation framework.
 Usage:
     python3 nightscout_profile.py --url https://ccmscout.us.nightscoutpro.com
     python3 nightscout_profile.py --url <url> --days 28 --output patient_profiles/ns_inferred.json
+    python3 nightscout_profile.py --url <url> --start-date 2025-10-01 --end-date 2026-01-19
+    python3 nightscout_profile.py --url <url> --start-date 2025-10-01  # end defaults to start+days
 """
 
 import json
@@ -176,8 +178,11 @@ def extract_meal_pattern(
     print("Step 2: Meal Patterns from Carb Treatments")
     print(f"{'='*70}")
 
-    # Collect carb entries with local time
+    # Collect carb entries with local time and source metadata
     carb_entries = []
+    n_loop = 0
+    n_trio = 0
+    n_other = 0
     for t in treatments:
         carbs = t.get("carbs")
         if not carbs or carbs <= 0:
@@ -190,14 +195,37 @@ def extract_meal_pattern(
         except (ValueError, AttributeError):
             continue
         local_dt = dt.astimezone(tz)
+
+        entered_by = t.get("enteredBy", "")
+        is_loop = "loop" in entered_by.lower()
+        is_trio = "trio" in entered_by.lower()
+        if is_loop:
+            n_loop += 1
+        elif is_trio:
+            n_trio += 1
+        else:
+            n_other += 1
+
+        # Loop-era treatments have absorptionTime in seconds
+        absorption_sec = t.get("absorptionTime")
+        absorption_hrs = absorption_sec / 3600.0 if absorption_sec else None
+
         carb_entries.append({
             "local_dt": local_dt,
             "hour": local_dt.hour,
             "carbs": carbs,
+            "absorption_hrs": absorption_hrs,
+            "source": "loop" if is_loop else ("trio" if is_trio else "other"),
         })
 
     print(f"\n  Total carb entries: {len(carb_entries)} over {n_days} days "
           f"({len(carb_entries)/max(1,n_days):.1f}/day)")
+    print(f"  Sources: Loop={n_loop}, Trio={n_trio}, Other={n_other}")
+    has_loop_absorption = any(e["absorption_hrs"] is not None for e in carb_entries)
+    if has_loop_absorption:
+        abs_vals = [e["absorption_hrs"] for e in carb_entries if e["absorption_hrs"] is not None]
+        print(f"  Loop absorption times available: {len(abs_vals)} entries "
+              f"(median={np.median(abs_vals):.1f}h, range={min(abs_vals):.1f}-{max(abs_vals):.1f}h)")
 
     if not carb_entries:
         return []
@@ -249,10 +277,13 @@ def extract_meal_pattern(
         # Gather all carb values in this slot
         slot_carbs = []
         slot_times_min = []  # minutes from midnight
+        slot_absorption_hrs = []  # from Loop-era metadata
         for e in carb_entries:
             if e["hour"] in slot_hours:
                 slot_carbs.append(e["carbs"])
                 slot_times_min.append(e["local_dt"].hour * 60 + e["local_dt"].minute)
+                if e["absorption_hrs"] is not None:
+                    slot_absorption_hrs.append(e["absorption_hrs"])
 
         if not slot_carbs:
             continue
@@ -263,11 +294,19 @@ def extract_meal_pattern(
         # Convert clock time to simulator time (minutes from 7am)
         time_of_day_minutes = (mean_time_min - 7 * 60) % 1440
 
+        # Use Loop-era absorption times if available, otherwise default 3.0h
+        if slot_absorption_hrs:
+            absorption_hrs = round(float(np.median(slot_absorption_hrs)), 1)
+            abs_source = f"Loop median of {len(slot_absorption_hrs)}"
+        else:
+            absorption_hrs = 3.0
+            abs_source = "default"
+
         spec = {
             "time_of_day_minutes": time_of_day_minutes,
             "carbs_mean": round(float(np.mean(arr)), 1),
             "carbs_sd": round(float(np.std(arr)), 1) if len(arr) > 1 else round(float(np.mean(arr)) * 0.3, 1),
-            "absorption_hrs": 3.0,
+            "absorption_hrs": absorption_hrs,
         }
         meal_specs.append(spec)
 
@@ -275,6 +314,7 @@ def extract_meal_pattern(
         freq = len(slot_carbs) / n_days
         print(f"    {slot_label} → sim t={spec['time_of_day_minutes']}min, "
               f"mean={spec['carbs_mean']}g, sd={spec['carbs_sd']}g, "
+              f"abs={absorption_hrs}h ({abs_source}), "
               f"{freq:.1f}/day ({len(slot_carbs)} entries)")
 
     return meal_specs
@@ -441,11 +481,30 @@ def build_profile(
     token: Optional[str] = None,
     output_path: Optional[str] = None,
     layer2: bool = True,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
 ) -> dict:
-    """Full pipeline: fetch NS data → extract patterns → build PatientProfile dict."""
+    """Full pipeline: fetch NS data → extract patterns → build PatientProfile dict.
 
-    end_date = datetime.now(timezone.utc)
-    start_date = end_date - timedelta(days=days)
+    Date range: if start_date/end_date are provided, they take precedence over days.
+    If only one is provided, the other is inferred from days.
+    """
+
+    if start_date and end_date:
+        days = max(1, (end_date - start_date).days)
+    elif start_date:
+        end_date = start_date + timedelta(days=days)
+    elif end_date:
+        start_date = end_date - timedelta(days=days)
+    else:
+        end_date = datetime.now(timezone.utc)
+        start_date = end_date - timedelta(days=days)
+
+    # Ensure timezone-aware
+    if start_date.tzinfo is None:
+        start_date = start_date.replace(tzinfo=timezone.utc)
+    if end_date.tzinfo is None:
+        end_date = end_date.replace(tzinfo=timezone.utc)
 
     print(f"Querying {url}")
     print(f"Date range: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
@@ -472,6 +531,12 @@ def build_profile(
     print("\nFetching treatments...")
     all_treatments = fetch_treatments(url, start_date, end_date, token=token, count=50000)
     print(f"  Got {len(all_treatments)} treatment entries")
+
+    # Detect data source (Loop vs Trio)
+    loop_count = sum(1 for t in all_treatments if "loop" in t.get("enteredBy", "").lower())
+    trio_count = sum(1 for t in all_treatments if "trio" in t.get("enteredBy", "").lower())
+    data_source = "loop" if loop_count > trio_count else ("trio" if trio_count > 0 else "unknown")
+    print(f"  Data source: {data_source} (Loop={loop_count}, Trio={trio_count})")
 
     # --- Step 2: Meal patterns ---
     meal_specs = extract_meal_pattern(all_treatments, tz, days)
@@ -1195,6 +1260,10 @@ def main():
                         help="Nightscout URL")
     parser.add_argument("--days", type=int, default=28,
                         help="Days of history to analyze (default 28)")
+    parser.add_argument("--start-date", type=str, default=None,
+                        help="Start date (YYYY-MM-DD). Overrides --days if used with --end-date.")
+    parser.add_argument("--end-date", type=str, default=None,
+                        help="End date (YYYY-MM-DD). Defaults to today if --start-date is given.")
     parser.add_argument("--token", type=str, default=None,
                         help="API access token")
     parser.add_argument("--output", type=str,
@@ -1204,12 +1273,21 @@ def main():
                         help="Skip Layer 2 deviation analysis (use defaults)")
     args = parser.parse_args()
 
+    start_dt = None
+    end_dt = None
+    if args.start_date:
+        start_dt = datetime.strptime(args.start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    if args.end_date:
+        end_dt = datetime.strptime(args.end_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+
     build_profile(
         url=args.url,
         days=args.days,
         token=args.token,
         output_path=args.output,
         layer2=not args.no_layer2,
+        start_date=start_dt,
+        end_date=end_dt,
     )
 
 
