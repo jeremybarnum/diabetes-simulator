@@ -159,8 +159,17 @@ class EnhancedPatientModel:
         self.settings_basal = settings['basal_rate']
         self.carb_ratio = settings['carb_ratio']
 
+        insulin_type_map = {
+            'fiasp': InsulinType.FIASP,
+            'rapid_acting_adult': InsulinType.RAPID_ACTING_ADULT,
+            'rapid_acting_child': InsulinType.RAPID_ACTING_CHILD,
+            'lyumjev': InsulinType.LYUMJEV,
+            'afrezza': InsulinType.AFREZZA,
+        }
+        insulin_type = insulin_type_map.get(
+            settings.get('insulin_type', 'fiasp'), InsulinType.FIASP)
         self.insulin_model = create_insulin_model(
-            InsulinType.FIASP,
+            insulin_type,
             settings['duration_of_insulin_action'],
         )
         self.carb_math = create_carb_math(
