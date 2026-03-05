@@ -1038,6 +1038,24 @@ with tab_ns:
             # Starting BG
             st.metric("Starting BG (morning median)", f"{profile_dict.get('starting_bg', '?')} mg/dL")
 
+            # Reference BG stats
+            ref = profile_dict.get("ns_reference_stats", {})
+            if ref:
+                st.subheader("Reference BG Statistics")
+                st.caption(f"From Nightscout data: {ref.get('start_date', '?')} to {ref.get('end_date', '?')} "
+                           f"({ref.get('days', '?')} days, source: {ref.get('data_source', '?')})")
+                rc1, rc2, rc3, rc4 = st.columns(4)
+                rc1.metric("Mean BG", f"{ref.get('mean_bg', '?')} mg/dL")
+                rc2.metric("SD", f"{ref.get('sd_bg', '?')} mg/dL")
+                rc3.metric("GMI", f"{ref.get('gmi', '?')}%")
+                rc4.metric("TIR (70-180)", f"{ref.get('tir', '?')}%")
+                rc5, rc6, rc7, rc8 = st.columns(4)
+                rc5.metric("Time <70", f"{ref.get('time_below_70', '?')}%")
+                rc6.metric("Time <54", f"{ref.get('time_below_54', '?')}%")
+                rc7.metric("Time >180", f"{ref.get('time_above_180', '?')}%")
+                rc8.metric("Time >250", f"{ref.get('time_above_250', '?')}%")
+                st.info("Compare these reference stats against simulation results to validate the patient model.")
+
             # Full log
             with st.expander("Full import log"):
                 st.code(log_buffer.getvalue())
@@ -1168,14 +1186,47 @@ with tab_results:
 
             # Summary stats table
             st.subheader("Summary Statistics")
-            cols = st.columns(len(variant_labels))
-            for col, vlabel in zip(cols, variant_labels):
-                with col:
+
+            # Check if the loaded profile has NS reference stats
+            ref_stats = None
+            profile_path_loaded = st.session_state.get("loaded_profile", "")
+            if profile_path_loaded:
+                try:
+                    with open(profile_path_loaded) as _f:
+                        _pdata = json.load(_f)
+                    ref_stats = _pdata.get("ns_reference_stats")
+                except Exception:
+                    pass
+
+            n_cols = len(variant_labels) + (1 if ref_stats else 0)
+            cols = st.columns(n_cols)
+            col_idx = 0
+
+            if ref_stats:
+                with cols[col_idx]:
+                    st.markdown(f"**NS Reference**")
+                    st.caption(f"{ref_stats.get('start_date', '?')} to {ref_stats.get('end_date', '?')}")
+                    ref_display = {
+                        "Mean BG (mg/dL)": f"{ref_stats.get('mean_bg', '?')}",
+                        "TIR 70-180 (%)": f"{ref_stats.get('tir', '?')}",
+                        "Time <70 (%)": f"{ref_stats.get('time_below_70', '?')}",
+                        "Time <54 (%)": f"{ref_stats.get('time_below_54', '?')}",
+                        "Time >180 (%)": f"{ref_stats.get('time_above_180', '?')}",
+                        "Time >250 (%)": f"{ref_stats.get('time_above_250', '?')}",
+                        "GMI (%)": f"{ref_stats.get('gmi', '?')}",
+                    }
+                    for metric, value in ref_display.items():
+                        st.metric(metric, value)
+                col_idx += 1
+
+            for vlabel in variant_labels:
+                with cols[col_idx]:
                     display = _variant_display_name(vlabel)
                     st.markdown(f"**{display}**")
                     stats = compute_summary_stats(metrics_by_variant[vlabel])
                     for metric, value in stats.items():
                         st.metric(metric, value)
+                col_idx += 1
 
             # Head-to-head (if exactly 2 variants)
             if len(variant_labels) == 2:
@@ -1333,9 +1384,19 @@ auto-generates a patient profile:
 - Extracts therapy settings (ISF, CR, basal rate, target)
 - Estimates carb counting accuracy and sensitivity variation from historical data
 - Detects exercise patterns
+- **Records reference BG statistics** (TIR, mean BG, time below 70, etc.) from the
+  selected period — these appear alongside simulation results for easy comparison
+
+You can choose a specific date range instead of "last N days". This is useful for:
+- Pulling data from a **Loop-only** or **Trio-only** period (the importer detects
+  which app uploaded each entry via the `enteredBy` field)
+- For **Loop-era data**, per-meal absorption times are extracted from Nightscout
+  metadata and used in the profile (instead of a blanket 3h default)
+- Analyzing a specific period of interest (e.g., before/after a settings change)
 
 This lets you simulate how different algorithms would perform for a real patient based
-on their actual eating and dosing patterns.
+on their actual eating and dosing patterns, and directly compare the simulator's output
+against the real-world statistics from that period.
 
 ---
 

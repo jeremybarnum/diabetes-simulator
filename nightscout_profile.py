@@ -629,6 +629,20 @@ def build_profile(
         "rescue_cooldown_min": 15.0,
         "rescue_carbs_declared_pct": 0.5,
         "algorithm_settings": merged_settings,
+        "ns_reference_stats": {
+            "start_date": start_date.strftime("%Y-%m-%d"),
+            "end_date": end_date.strftime("%Y-%m-%d"),
+            "days": days,
+            "data_source": data_source,
+            "mean_bg": bg_stats["mean_bg"],
+            "sd_bg": bg_stats["sd_bg"],
+            "tir": bg_stats["tir"],
+            "time_below_70": bg_stats["time_below_70"],
+            "time_below_54": bg_stats["time_below_54"],
+            "time_above_180": bg_stats["time_above_180"],
+            "time_above_250": bg_stats["time_above_250"],
+            "gmi": round(3.31 + 0.02392 * bg_stats["mean_bg"], 1),
+        },
     }
 
     if exercise_spec:
