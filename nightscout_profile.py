@@ -541,10 +541,8 @@ def build_profile(
                 devs, carb_treatment_entries, carb_times_ms, merged_settings
             )
 
-            # Step L2.4: Undeclared meals
-            l2_undeclared_meal_prob, l2_undeclared_meals = detect_undeclared_meals(
-                devs, carb_times_ms, tz, days, merged_settings
-            )
+            # Step L2.4: Undeclared meals — skipped (too noisy; picks up
+            # dawn phenomenon and BG drift rather than real undeclared food)
     elif layer2:
         print("\n  Skipping Layer 2: insufficient insulin/CGM data")
 
@@ -554,8 +552,8 @@ def build_profile(
         "carb_count_sigma": l2_carb_count_sigma,
         "carb_count_bias": l2_carb_count_bias,
         "absorption_sigma": 0.15,
-        "undeclared_meal_prob": l2_undeclared_meal_prob,
-        "undeclared_meals": l2_undeclared_meals,
+        "undeclared_meal_prob": 0.0,
+        "undeclared_meals": [],
         "sensitivity_sigma": l2_sensitivity_sigma,
         "exercises_per_week": exercises_per_week,
         "starting_bg": bg_stats["starting_bg"],
@@ -588,8 +586,8 @@ def build_profile(
         print(f"    sensitivity_sigma:    {l2_sensitivity_sigma}")
         print(f"    carb_count_sigma:     {l2_carb_count_sigma}")
         print(f"    carb_count_bias:      {l2_carb_count_bias}")
-        print(f"    undeclared_meal_prob: {l2_undeclared_meal_prob}")
-        print(f"    undeclared_meals:     {len(l2_undeclared_meals)} slots")
+        print(f"    undeclared_meal_prob: 0.0 (detection disabled)")
+        print(f"    undeclared_meals:     0 slots (detection disabled)")
     else:
         print(f"\n  Defaulted (Layer 2 skipped):")
         print(f"    carb_count_sigma: 0.15")
