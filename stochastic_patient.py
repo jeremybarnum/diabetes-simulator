@@ -175,6 +175,10 @@ class EnhancedPatientModel:
         """
         Get combined sensitivity scalar at time t.
 
+        Args:
+            t_minutes: Absolute time in minutes (must match exercise
+                       event start_time_minutes coordinate system).
+
         Combines daily sensitivity model with any active exercise effects.
         """
         s = 1.0
@@ -218,7 +222,7 @@ class EnhancedPatientModel:
 
             # True ISF at current time: settings.ISF / S(t)
             # When S > 1 (resistant): true_ISF is lower, insulin has less effect
-            s = self.get_sensitivity_scalar(t_rel)
+            s = self.get_sensitivity_scalar(time)
             true_isf = self.settings_isf / s
 
             insulin_effect += -units * true_isf * pct_absorbed
@@ -266,7 +270,7 @@ class EnhancedPatientModel:
             while t < t_end_rel:
                 t_next = min(t + dt, t_end_rel)
                 interval = t_next - t
-                s = self.get_sensitivity_scalar(t)
+                s = self.get_sensitivity_scalar(sim_start_time + t)
 
                 if abs(s - 1.0) > 1e-6:
                     # Basal deficit in units for this interval
@@ -314,7 +318,7 @@ class EnhancedPatientModel:
         from itertools import chain
 
         t_rel = current_time - sim_start_time
-        s_now = self.get_sensitivity_scalar(t_rel)
+        s_now = self.get_sensitivity_scalar(current_time)
         dia_minutes = self.insulin_model.action_duration + 10  # buffer
 
         # --- Insulin delta (real doses + basal deficit virtual doses) ---

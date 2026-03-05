@@ -644,6 +644,13 @@ def reconstruct_insulin_timeline(
 
     temp_basals.sort(key=lambda x: x["time"])
 
+    # Clip each temp basal's duration to the start of the next one
+    # (Trio issues new temp basals every ~5 min, each declared for 30 min)
+    for i in range(len(temp_basals)):
+        if i + 1 < len(temp_basals):
+            max_dur = (temp_basals[i + 1]["time"] - temp_basals[i]["time"]) / 60.0
+            temp_basals[i]["duration_min"] = max(0, min(temp_basals[i]["duration_min"], max_dur))
+
     # Add temp basal segments as events
     for tb in temp_basals:
         units = tb["rate"] * tb["duration_min"] / 60.0

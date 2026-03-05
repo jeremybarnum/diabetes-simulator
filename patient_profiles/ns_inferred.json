@@ -1,0 +1,77 @@
+{
+    "meals": [
+        {
+            "time_of_day_minutes": 56,
+            "carbs_mean": 6.8,
+            "carbs_sd": 4.5,
+            "absorption_hrs": 3.0
+        },
+        {
+            "time_of_day_minutes": 138,
+            "carbs_mean": 11.2,
+            "carbs_sd": 4.0,
+            "absorption_hrs": 3.0
+        },
+        {
+            "time_of_day_minutes": 355,
+            "carbs_mean": 11.1,
+            "carbs_sd": 5.5,
+            "absorption_hrs": 3.0
+        },
+        {
+            "time_of_day_minutes": 479,
+            "carbs_mean": 8.8,
+            "carbs_sd": 4.0,
+            "absorption_hrs": 3.0
+        },
+        {
+            "time_of_day_minutes": 707,
+            "carbs_mean": 12.3,
+            "carbs_sd": 5.2,
+            "absorption_hrs": 3.0
+        },
+        {
+            "time_of_day_minutes": 805,
+            "carbs_mean": 12.4,
+            "carbs_sd": 5.9,
+            "absorption_hrs": 3.0
+        }
+    ],
+    "carb_count_sigma": 0.346,
+    "carb_count_bias": 0.532,
+    "absorption_sigma": 0.15,
+    "undeclared_meal_prob": 0.0,
+    "undeclared_meals": [],
+    "sensitivity_sigma": 0.262,
+    "exercises_per_week": 2.0,
+    "starting_bg": 112.0,
+    "rescue_carbs_enabled": true,
+    "rescue_threshold": 65.0,
+    "rescue_carbs_grams": 8.0,
+    "rescue_absorption_hrs": 1.0,
+    "rescue_cooldown_min": 15.0,
+    "rescue_carbs_declared_pct": 0.5,
+    "algorithm_settings": {
+        "insulin_sensitivity_factor": 90.0,
+        "carb_ratio": 11.3,
+        "basal_rate": 0.544,
+        "duration_of_insulin_action": 6.0,
+        "target": 102.0,
+        "suspend_threshold": 80.0,
+        "max_basal_rate": 2.8,
+        "max_bolus": 3.0,
+        "insulin_type": "fiasp",
+        "enable_irc": true,
+        "enable_momentum": true,
+        "enable_dca": true
+    },
+    "exercise_spec": {
+        "time_of_day_minutes": 333,
+        "declared_scalar": 0.5,
+        "declared_duration_hrs": 3.0,
+        "actual_scalar_mean": 0.5,
+        "actual_scalar_sigma": 0.15,
+        "actual_duration_hrs_mean": 6.0,
+        "actual_duration_hrs_sigma": 0.2
+    }
+}

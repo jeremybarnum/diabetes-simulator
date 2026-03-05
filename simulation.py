@@ -559,7 +559,7 @@ class SimulationRun:
             # Deficit = basal * (1 - S(t)) * dt/60 units of "virtual insulin"
             # that the patient experiences but the algorithm doesn't see.
             t_rel = current_time - sim_start
-            s_now = patient.get_sensitivity_scalar(t_rel)
+            s_now = patient.get_sensitivity_scalar(current_time)
             if abs(s_now - 1.0) > 1e-6:
                 deficit_units = basal_rate * (1.0 - s_now) * 5.0 / 60.0
                 basal_deficit_entries.append((current_time, deficit_units))
@@ -643,7 +643,7 @@ class SimulationRun:
             # --- Record to day result ---
             day_results[-1].bg_trace.append((t_rel, bg))
             day_results[-1].sensitivity_trace.append(
-                (t_rel, patient.get_sensitivity_scalar(t_rel)))
+                (t_rel, patient.get_sensitivity_scalar(current_time)))
 
             # --- Prune old entries ---
             # With delta-based BG, fully absorbed entries contribute 0 delta
