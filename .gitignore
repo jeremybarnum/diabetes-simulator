@@ -24,6 +24,9 @@ docs/*
 Trio/
 node_modules/
 
+# Local config (may contain tokens)
+.ns_config.json
+
 # System / IDE
 .DS_Store
 .claude/

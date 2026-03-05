@@ -1,0 +1,1212 @@
+#!/usr/bin/env python3
+"""
+Infer a PatientProfile from Nightscout data.
+
+Pulls real meal/bolus/CGM/profile data and auto-generates a patient profile
+compatible with the Monte Carlo simulation framework.
+
+Usage:
+    python3 nightscout_profile.py --url https://ccmscout.us.nightscoutpro.com
+    python3 nightscout_profile.py --url <url> --days 28 --output patient_profiles/ns_inferred.json
+"""
+
+import json
+import math
+import argparse
+import numpy as np
+from dataclasses import dataclass, asdict
+from datetime import datetime, timedelta, timezone
+from collections import defaultdict
+from pathlib import Path
+from typing import List, Dict, Optional, Tuple
+from zoneinfo import ZoneInfo
+
+from nightscout_query import (
+    fetch_profile,
+    fetch_treatments,
+    fetch_entries,
+    fetch_boluses,
+    fetch_temp_basals,
+    fetch_exercise,
+)
+from algorithms.openaps.iob import iob_total, find_insulin
+
+
+# ─── Data Classes ─────────────────────────────────────────────────────────────
+
+@dataclass
+class InsulinEvent:
+    """A single insulin delivery event (basal segment, bolus, or SMB)."""
+    time: float           # Unix timestamp
+    event_type: str       # 'basal' | 'bolus' | 'smb'
+    units: float          # Total units delivered
+    rate: float           # U/hr (for basal segments, 0 for boluses)
+    duration_min: float   # Duration in minutes (for basal segments, 0 for boluses)
+
+
+# ─── Step 1: Algorithm Settings from NS Profile ──────────────────────────────
+
+def extract_algorithm_settings(profile_json: dict) -> dict:
+    """Extract time-weighted average algorithm settings from NS profile.
+
+    Converts NS time-varying schedules (basal, CR, ISF, target) into
+    single scalar values via time-weighted averaging.
+    """
+    print(f"\n{'='*70}")
+    print("Step 1: Algorithm Settings from Nightscout Profile")
+    print(f"{'='*70}")
+
+    settings = {}
+
+    # --- Basal schedule ---
+    basal_schedule = profile_json.get("basal", [])
+    if basal_schedule:
+        print(f"\n  Basal schedule ({len(basal_schedule)} entries):")
+        basal_avg = _time_weighted_average(basal_schedule, value_key="value")
+        for entry in basal_schedule:
+            t = _seconds_to_hhmm(entry["timeAsSeconds"])
+            print(f"    {t}: {entry['value']:.3f} U/hr")
+        print(f"  → Time-weighted average: {basal_avg:.3f} U/hr")
+        settings["basal_rate"] = round(basal_avg, 3)
+
+    # --- Carb ratio schedule ---
+    cr_schedule = profile_json.get("carbratio", [])
+    if cr_schedule:
+        print(f"\n  Carb ratio schedule ({len(cr_schedule)} entries):")
+        cr_avg = _time_weighted_average(cr_schedule, value_key="value")
+        for entry in cr_schedule:
+            t = _seconds_to_hhmm(entry["timeAsSeconds"])
+            print(f"    {t}: {entry['value']:.1f} g/U")
+        print(f"  → Time-weighted average: {cr_avg:.1f} g/U")
+        settings["carb_ratio"] = round(cr_avg, 1)
+
+    # --- ISF schedule ---
+    isf_schedule = profile_json.get("sens", [])
+    if isf_schedule:
+        print(f"\n  ISF schedule ({len(isf_schedule)} entries):")
+        isf_avg = _time_weighted_average(isf_schedule, value_key="value")
+        for entry in isf_schedule:
+            t = _seconds_to_hhmm(entry["timeAsSeconds"])
+            print(f"    {t}: {entry['value']:.0f} mg/dL/U")
+        print(f"  → Time-weighted average: {isf_avg:.0f} mg/dL/U")
+        settings["insulin_sensitivity_factor"] = round(isf_avg, 0)
+
+    # --- Target BG schedule ---
+    target_low = profile_json.get("target_low", [])
+    target_high = profile_json.get("target_high", [])
+    if target_low and target_high:
+        # Average of (low+high)/2 across schedule
+        print(f"\n  Target BG schedule ({len(target_low)} entries):")
+        combined = []
+        for lo, hi in zip(target_low, target_high):
+            mid = (lo["value"] + hi["value"]) / 2.0
+            combined.append({"timeAsSeconds": lo["timeAsSeconds"], "value": mid})
+            t = _seconds_to_hhmm(lo["timeAsSeconds"])
+            print(f"    {t}: {lo['value']:.0f}-{hi['value']:.0f} (mid={mid:.0f})")
+        target_avg = _time_weighted_average(combined, value_key="value")
+        print(f"  → Time-weighted average: {target_avg:.0f} mg/dL")
+        settings["target"] = round(target_avg, 0)
+    elif target_low:
+        print(f"\n  Target BG schedule ({len(target_low)} entries):")
+        target_avg = _time_weighted_average(target_low, value_key="value")
+        for entry in target_low:
+            t = _seconds_to_hhmm(entry["timeAsSeconds"])
+            print(f"    {t}: {entry['value']:.0f} mg/dL")
+        print(f"  → Time-weighted average: {target_avg:.0f} mg/dL")
+        settings["target"] = round(target_avg, 0)
+
+    # --- DIA: intentionally NOT extracted ---
+    dia = profile_json.get("dia")
+    if dia:
+        print(f"\n  DIA in NS profile: {dia} hrs (NOT used — kept from settings.json)")
+
+    # --- Timezone ---
+    tz_str = profile_json.get("timezone", "")
+    if tz_str:
+        print(f"\n  Timezone: {tz_str}")
+
+    return settings
+
+
+def _time_weighted_average(schedule: List[dict], value_key: str = "value") -> float:
+    """Compute time-weighted average of a NS schedule (24hr cycle).
+
+    Each entry has 'timeAsSeconds' (seconds from midnight) and a value field.
+    """
+    if len(schedule) == 1:
+        return schedule[0][value_key]
+
+    sorted_entries = sorted(schedule, key=lambda e: e["timeAsSeconds"])
+    total_weight = 0.0
+    total_value = 0.0
+
+    for i, entry in enumerate(sorted_entries):
+        start = entry["timeAsSeconds"]
+        if i + 1 < len(sorted_entries):
+            end = sorted_entries[i + 1]["timeAsSeconds"]
+        else:
+            end = 86400  # midnight
+        duration = end - start
+        total_weight += duration
+        total_value += duration * entry[value_key]
+
+    return total_value / total_weight if total_weight > 0 else sorted_entries[0][value_key]
+
+
+def _seconds_to_hhmm(seconds: int) -> str:
+    """Convert seconds from midnight to HH:MM string."""
+    h = seconds // 3600
+    m = (seconds % 3600) // 60
+    return f"{h:02d}:{m:02d}"
+
+
+# ─── Step 2: Meal Patterns from Carb Treatments ──────────────────────────────
+
+def extract_meal_pattern(
+    treatments: List[dict],
+    tz: ZoneInfo,
+    n_days: int,
+) -> List[dict]:
+    """Extract meal schedule from carb treatments.
+
+    Groups carb entries by hour, merges adjacent active hours into meal slots,
+    and returns MealSpec-compatible dicts.
+    """
+    print(f"\n{'='*70}")
+    print("Step 2: Meal Patterns from Carb Treatments")
+    print(f"{'='*70}")
+
+    # Collect carb entries with local time
+    carb_entries = []
+    for t in treatments:
+        carbs = t.get("carbs")
+        if not carbs or carbs <= 0:
+            continue
+        created = t.get("created_at", "")
+        if not created:
+            continue
+        try:
+            dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            continue
+        local_dt = dt.astimezone(tz)
+        carb_entries.append({
+            "local_dt": local_dt,
+            "hour": local_dt.hour,
+            "carbs": carbs,
+        })
+
+    print(f"\n  Total carb entries: {len(carb_entries)} over {n_days} days "
+          f"({len(carb_entries)/max(1,n_days):.1f}/day)")
+
+    if not carb_entries:
+        return []
+
+    # Bucket by hour
+    hourly = defaultdict(list)
+    for e in carb_entries:
+        hourly[e["hour"]].append(e["carbs"])
+
+    print(f"\n  Hourly distribution:")
+    print(f"  {'Hour':<8} {'Count':>6} {'Per Day':>8} {'Mean g':>8} {'SD g':>8}")
+    print(f"  {'-'*40}")
+    for h in range(24):
+        vals = hourly[h]
+        if vals:
+            arr = np.array(vals)
+            per_day = len(vals) / n_days
+            print(f"  {h:02d}:00    {len(vals):>6} {per_day:>8.2f} "
+                  f"{np.mean(arr):>8.1f} {np.std(arr):>8.1f}")
+
+    # Merge adjacent active hours into meal slots
+    # An hour is "active" if it has >= 0.3 entries/day
+    min_freq = 0.3
+    active_hours = sorted(h for h in range(24) if len(hourly[h]) / n_days >= min_freq)
+
+    if not active_hours:
+        # Fallback: lower threshold
+        min_freq = 0.1
+        active_hours = sorted(h for h in range(24) if len(hourly[h]) / n_days >= min_freq)
+
+    # Group consecutive hours into slots, but break slots wider than max_slot_hours
+    # This prevents jamming a full-day grazing pattern into 3 mega-slots
+    max_slot_hours = 2  # Max 2 consecutive hours per slot
+    slots = []
+    if active_hours:
+        current_slot = [active_hours[0]]
+        for h in active_hours[1:]:
+            if h == current_slot[-1] + 1 and len(current_slot) < max_slot_hours:
+                current_slot.append(h)
+            else:
+                slots.append(current_slot)
+                current_slot = [h]
+        slots.append(current_slot)
+
+    # Convert slots to MealSpecs
+    meal_specs = []
+    print(f"\n  Detected meal slots:")
+    for slot_hours in slots:
+        # Gather all carb values in this slot
+        slot_carbs = []
+        slot_times_min = []  # minutes from midnight
+        for e in carb_entries:
+            if e["hour"] in slot_hours:
+                slot_carbs.append(e["carbs"])
+                slot_times_min.append(e["local_dt"].hour * 60 + e["local_dt"].minute)
+
+        if not slot_carbs:
+            continue
+
+        arr = np.array(slot_carbs)
+        mean_time_min = int(np.mean(slot_times_min))
+
+        # Convert clock time to simulator time (minutes from 7am)
+        time_of_day_minutes = (mean_time_min - 7 * 60) % 1440
+
+        spec = {
+            "time_of_day_minutes": time_of_day_minutes,
+            "carbs_mean": round(float(np.mean(arr)), 1),
+            "carbs_sd": round(float(np.std(arr)), 1) if len(arr) > 1 else round(float(np.mean(arr)) * 0.3, 1),
+            "absorption_hrs": 3.0,
+        }
+        meal_specs.append(spec)
+
+        slot_label = f"{slot_hours[0]:02d}:00-{slot_hours[-1]+1:02d}:00"
+        freq = len(slot_carbs) / n_days
+        print(f"    {slot_label} → sim t={spec['time_of_day_minutes']}min, "
+              f"mean={spec['carbs_mean']}g, sd={spec['carbs_sd']}g, "
+              f"{freq:.1f}/day ({len(slot_carbs)} entries)")
+
+    return meal_specs
+
+
+# ─── Step 3: Exercise Patterns ───────────────────────────────────────────────
+
+def extract_exercise_pattern(
+    treatments: List[dict],
+    tz: ZoneInfo,
+    n_days: int,
+) -> Tuple[float, Optional[dict]]:
+    """Extract exercise frequency and typical spec from Exercise treatments.
+
+    Returns (exercises_per_week, exercise_spec_dict_or_None).
+    """
+    print(f"\n{'='*70}")
+    print("Step 3: Exercise Patterns")
+    print(f"{'='*70}")
+
+    exercise_entries = [t for t in treatments if t.get("eventType") == "Exercise"]
+
+    if not exercise_entries:
+        print("\n  No Exercise events found.")
+        return 0.0, None
+
+    # Categorize by notes field
+    categories = defaultdict(list)
+    for t in exercise_entries:
+        notes = t.get("notes", "").strip()
+        created = t.get("created_at", "")
+        try:
+            dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            continue
+        local_dt = dt.astimezone(tz)
+        duration = t.get("duration", 0)
+        categories[notes or "(no notes)"].append({
+            "local_dt": local_dt,
+            "duration_min": duration,
+        })
+
+    print(f"\n  Exercise categories:")
+    for notes, entries in sorted(categories.items(), key=lambda x: -len(x[1])):
+        freq = len(entries) / n_days * 7
+        print(f"    '{notes}': {len(entries)} events ({freq:.1f}/week)")
+
+    # "Cardio" = real exercise; others are Trio override presets
+    real_exercise = categories.get("Cardio", [])
+    if not real_exercise:
+        # Try to find the most frequent category as real exercise
+        # but only if it's not clearly an override preset
+        override_keywords = {"off", "slight", "override", "preset", "jht"}
+        for notes, entries in sorted(categories.items(), key=lambda x: -len(x[1])):
+            if not any(kw in notes.lower() for kw in override_keywords):
+                real_exercise = entries
+                print(f"\n  Using '{notes}' as real exercise category")
+                break
+
+    if not real_exercise:
+        print("\n  No real exercise events identified (all appear to be override presets).")
+        return 0.0, None
+
+    exercises_per_week = len(real_exercise) / n_days * 7
+    print(f"\n  Real exercise: {len(real_exercise)} events = {exercises_per_week:.1f}/week")
+
+    # Typical time of day
+    times_min = [e["local_dt"].hour * 60 + e["local_dt"].minute for e in real_exercise]
+    mean_time = int(np.mean(times_min))
+    time_of_day_minutes = (mean_time - 7 * 60) % 1440
+    print(f"  Typical time: {mean_time // 60:02d}:{mean_time % 60:02d} "
+          f"(sim t={time_of_day_minutes}min)")
+
+    # Duration
+    durations = [e["duration_min"] for e in real_exercise if e["duration_min"] > 0]
+    if durations:
+        mean_dur = np.mean(durations)
+        print(f"  Typical duration: {mean_dur:.0f} min")
+
+    exercise_spec = {
+        "time_of_day_minutes": time_of_day_minutes,
+        "declared_scalar": 0.5,
+        "declared_duration_hrs": 3.0,
+        "actual_scalar_mean": 0.5,
+        "actual_scalar_sigma": 0.15,
+        "actual_duration_hrs_mean": 6.0,
+        "actual_duration_hrs_sigma": 0.2,
+    }
+
+    return round(exercises_per_week, 1), exercise_spec
+
+
+# ─── Step 4: BG Stats ────────────────────────────────────────────────────────
+
+def extract_bg_stats(entries: List[dict], tz: ZoneInfo) -> dict:
+    """Compute BG statistics from CGM entries.
+
+    Returns dict with starting_bg and reference stats.
+    """
+    print(f"\n{'='*70}")
+    print("Step 4: BG Statistics")
+    print(f"{'='*70}")
+
+    sgv_values = []
+    morning_values = []  # 7-8am local
+
+    for e in entries:
+        sgv = e.get("sgv")
+        date_ms = e.get("date")
+        if sgv is None or date_ms is None or sgv <= 0:
+            continue
+        sgv_values.append(sgv)
+
+        dt_utc = datetime.fromtimestamp(date_ms / 1000, tz=timezone.utc)
+        local_dt = dt_utc.astimezone(tz)
+        if 7 <= local_dt.hour < 8:
+            morning_values.append(sgv)
+
+    if not sgv_values:
+        print("\n  No CGM data available.")
+        return {"starting_bg": 120.0}
+
+    arr = np.array(sgv_values)
+    n_total = len(arr)
+
+    mean_bg = float(np.mean(arr))
+    sd_bg = float(np.std(arr))
+    tir = float(np.mean((arr >= 70) & (arr <= 180)) * 100)
+    time_below_70 = float(np.mean(arr < 70) * 100)
+    time_below_54 = float(np.mean(arr < 54) * 100)
+    time_above_180 = float(np.mean(arr > 180) * 100)
+    time_above_250 = float(np.mean(arr > 250) * 100)
+
+    starting_bg = float(np.median(morning_values)) if morning_values else mean_bg
+
+    print(f"\n  CGM readings: {n_total}")
+    print(f"  Mean BG:      {mean_bg:.0f} mg/dL")
+    print(f"  SD:           {sd_bg:.0f} mg/dL")
+    print(f"  GMI:          {(3.31 + 0.02392 * mean_bg):.1f}%")
+    print(f"  TIR (70-180): {tir:.1f}%")
+    print(f"  Below 70:     {time_below_70:.1f}%")
+    print(f"  Below 54:     {time_below_54:.1f}%")
+    print(f"  Above 180:    {time_above_180:.1f}%")
+    print(f"  Above 250:    {time_above_250:.1f}%")
+    print(f"  Morning BG:   {starting_bg:.0f} mg/dL (median 7-8am, {len(morning_values)} readings)")
+
+    return {
+        "starting_bg": round(starting_bg, 0),
+        "mean_bg": round(mean_bg, 0),
+        "sd_bg": round(sd_bg, 0),
+        "tir": round(tir, 1),
+        "time_below_70": round(time_below_70, 1),
+        "time_below_54": round(time_below_54, 1),
+        "time_above_180": round(time_above_180, 1),
+        "time_above_250": round(time_above_250, 1),
+    }
+
+
+# ─── Step 5: Assemble Profile ────────────────────────────────────────────────
+
+def build_profile(
+    url: str,
+    days: int = 28,
+    token: Optional[str] = None,
+    output_path: Optional[str] = None,
+    layer2: bool = True,
+) -> dict:
+    """Full pipeline: fetch NS data → extract patterns → build PatientProfile dict."""
+
+    end_date = datetime.now(timezone.utc)
+    start_date = end_date - timedelta(days=days)
+
+    print(f"Querying {url}")
+    print(f"Date range: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+
+    # --- Fetch NS profile ---
+    print("\nFetching Nightscout profile...")
+    ns_profile = fetch_profile(url, token=token)
+
+    # Determine timezone
+    tz_str = ns_profile.get("timezone", "America/New_York")
+    tz = ZoneInfo(tz_str)
+    print(f"  Timezone: {tz_str}")
+
+    # --- Step 1: Algorithm settings ---
+    algo_settings = extract_algorithm_settings(ns_profile)
+
+    # Merge with defaults from settings.json
+    settings_path = Path(__file__).parent / "settings.json"
+    with open(settings_path) as f:
+        default_settings = json.load(f)
+    merged_settings = {**default_settings, **algo_settings}
+
+    # --- Fetch treatments ---
+    print("\nFetching treatments...")
+    all_treatments = fetch_treatments(url, start_date, end_date, token=token, count=50000)
+    print(f"  Got {len(all_treatments)} treatment entries")
+
+    # --- Step 2: Meal patterns ---
+    meal_specs = extract_meal_pattern(all_treatments, tz, days)
+
+    # --- Step 3: Exercise ---
+    exercises_per_week, exercise_spec = extract_exercise_pattern(all_treatments, tz, days)
+
+    # --- Fetch CGM entries ---
+    print("\nFetching CGM entries...")
+    cgm_entries = fetch_entries(url, start_date, end_date, token=token)
+    print(f"  Got {len(cgm_entries)} CGM readings")
+
+    # --- Step 4: BG stats ---
+    bg_stats = extract_bg_stats(cgm_entries, tz)
+
+    # --- Step 6: Insulin timeline (built but not included in profile) ---
+    print("\nReconstructing insulin timeline...")
+    basal_schedule = ns_profile.get("basal", [])
+    insulin_timeline = reconstruct_insulin_timeline(all_treatments, basal_schedule, tz)
+    print(f"  Built {len(insulin_timeline)} insulin events")
+
+    # Count by type
+    type_counts = defaultdict(int)
+    type_units = defaultdict(float)
+    for evt in insulin_timeline:
+        type_counts[evt.event_type] += 1
+        type_units[evt.event_type] += evt.units
+    for etype in sorted(type_counts.keys()):
+        print(f"    {etype}: {type_counts[etype]} events, {type_units[etype]:.1f}U total")
+
+    # --- Layer 2: Deviation Analysis ---
+    l2_sensitivity_sigma = 0.15
+    l2_carb_count_sigma = 0.15
+    l2_carb_count_bias = 0.0
+    l2_undeclared_meal_prob = 0.0
+    l2_undeclared_meals = []
+
+    if layer2 and insulin_timeline and cgm_entries:
+        # Collect carb timestamps for meal classification
+        carb_times_ms = []
+        carb_treatment_entries = []
+        for t in all_treatments:
+            carbs = t.get("carbs")
+            if not carbs or carbs <= 0:
+                continue
+            created = t.get("created_at", "")
+            if not created:
+                continue
+            try:
+                dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+            except (ValueError, AttributeError):
+                continue
+            carb_times_ms.append(int(dt.timestamp() * 1000))
+            carb_treatment_entries.append(t)
+
+        # Step L2.1: Compute deviations
+        devs = compute_deviations(
+            cgm_entries, insulin_timeline, merged_settings, basal_schedule, tz
+        )
+
+        if devs:
+            # Step L2.2: Sensitivity sigma
+            l2_sensitivity_sigma = estimate_sensitivity_sigma(devs, carb_times_ms, tz)
+
+            # Step L2.3: Carb counting error
+            l2_carb_count_sigma, l2_carb_count_bias = estimate_carb_counting_error(
+                devs, carb_treatment_entries, carb_times_ms, merged_settings
+            )
+
+            # Step L2.4: Undeclared meals
+            l2_undeclared_meal_prob, l2_undeclared_meals = detect_undeclared_meals(
+                devs, carb_times_ms, tz, days, merged_settings
+            )
+    elif layer2:
+        print("\n  Skipping Layer 2: insufficient insulin/CGM data")
+
+    # --- Assemble profile ---
+    profile = {
+        "meals": meal_specs,
+        "carb_count_sigma": l2_carb_count_sigma,
+        "carb_count_bias": l2_carb_count_bias,
+        "absorption_sigma": 0.15,
+        "undeclared_meal_prob": l2_undeclared_meal_prob,
+        "undeclared_meals": l2_undeclared_meals,
+        "sensitivity_sigma": l2_sensitivity_sigma,
+        "exercises_per_week": exercises_per_week,
+        "starting_bg": bg_stats["starting_bg"],
+        "rescue_carbs_enabled": True,
+        "rescue_threshold": 65.0,
+        "rescue_carbs_grams": 8.0,
+        "rescue_absorption_hrs": 1.0,
+        "rescue_cooldown_min": 15.0,
+        "rescue_carbs_declared_pct": 0.5,
+        "algorithm_settings": merged_settings,
+    }
+
+    if exercise_spec:
+        profile["exercise_spec"] = exercise_spec
+
+    # --- Summary ---
+    print(f"\n{'='*70}")
+    print("Profile Summary")
+    print(f"{'='*70}")
+    print(f"\n  Extracted from Nightscout (Layer 1):")
+    print(f"    Basal rate:  {merged_settings.get('basal_rate', '?')} U/hr")
+    print(f"    Carb ratio:  {merged_settings.get('carb_ratio', '?')} g/U")
+    print(f"    ISF:         {merged_settings.get('insulin_sensitivity_factor', '?')} mg/dL/U")
+    print(f"    Target:      {merged_settings.get('target', '?')} mg/dL")
+    print(f"    Meals:       {len(meal_specs)} slots")
+    print(f"    Exercise:    {exercises_per_week}/week")
+    print(f"    Starting BG: {bg_stats['starting_bg']} mg/dL")
+    if layer2:
+        print(f"\n  Estimated from deviation analysis (Layer 2):")
+        print(f"    sensitivity_sigma:    {l2_sensitivity_sigma}")
+        print(f"    carb_count_sigma:     {l2_carb_count_sigma}")
+        print(f"    carb_count_bias:      {l2_carb_count_bias}")
+        print(f"    undeclared_meal_prob: {l2_undeclared_meal_prob}")
+        print(f"    undeclared_meals:     {len(l2_undeclared_meals)} slots")
+    else:
+        print(f"\n  Defaulted (Layer 2 skipped):")
+        print(f"    carb_count_sigma: 0.15")
+        print(f"    carb_count_bias:  0.0")
+        print(f"    sensitivity_sigma: 0.15")
+        print(f"    undeclared_meal_prob: 0.0")
+    print(f"\n  Reference BG stats (for calibration):")
+    print(f"    Mean: {bg_stats['mean_bg']}, SD: {bg_stats['sd_bg']}, "
+          f"TIR: {bg_stats['tir']}%, <70: {bg_stats['time_below_70']}%")
+
+    # --- Save ---
+    if output_path:
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        with open(output_path, "w") as f:
+            json.dump(profile, f, indent=4)
+        print(f"\n  Saved to {output_path}")
+
+    return profile
+
+
+# ─── Step 6: Insulin History Reconstruction ──────────────────────────────────
+
+def reconstruct_insulin_timeline(
+    treatments: List[dict],
+    basal_schedule: List[dict],
+    tz: ZoneInfo,
+) -> List[InsulinEvent]:
+    """Reconstruct unified insulin timeline from NS treatments.
+
+    Combines temp basals, boluses, and SMBs into a sorted timeline.
+    Fills gaps between temp basals with scheduled basal from the profile.
+    """
+    events = []
+
+    # --- Parse temp basals ---
+    temp_basals = []
+    for t in treatments:
+        if t.get("eventType") != "Temp Basal":
+            continue
+        rate = t.get("rate")
+        duration = t.get("duration", 0)
+        created = t.get("created_at", "")
+        if rate is None or not created:
+            continue
+        try:
+            dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            continue
+        temp_basals.append({
+            "time": dt.timestamp(),
+            "rate": float(rate),
+            "duration_min": float(duration),
+        })
+
+    temp_basals.sort(key=lambda x: x["time"])
+
+    # Add temp basal segments as events
+    for tb in temp_basals:
+        units = tb["rate"] * tb["duration_min"] / 60.0
+        events.append(InsulinEvent(
+            time=tb["time"],
+            event_type="basal",
+            units=round(units, 4),
+            rate=tb["rate"],
+            duration_min=tb["duration_min"],
+        ))
+
+    # --- Fill gaps with scheduled basal ---
+    if temp_basals and basal_schedule:
+        sorted_schedule = sorted(basal_schedule, key=lambda e: e["timeAsSeconds"])
+        for i in range(len(temp_basals) - 1):
+            gap_start = temp_basals[i]["time"] + temp_basals[i]["duration_min"] * 60
+            gap_end = temp_basals[i + 1]["time"]
+            gap_duration_min = (gap_end - gap_start) / 60.0
+
+            if gap_duration_min > 1.0:  # Only fill gaps > 1 minute
+                # Find scheduled rate at gap_start
+                gap_dt = datetime.fromtimestamp(gap_start, tz=timezone.utc).astimezone(tz)
+                seconds_from_midnight = gap_dt.hour * 3600 + gap_dt.minute * 60 + gap_dt.second
+                scheduled_rate = _get_scheduled_rate(sorted_schedule, seconds_from_midnight)
+
+                units = scheduled_rate * gap_duration_min / 60.0
+                events.append(InsulinEvent(
+                    time=gap_start,
+                    event_type="basal",
+                    units=round(units, 4),
+                    rate=scheduled_rate,
+                    duration_min=round(gap_duration_min, 1),
+                ))
+
+    # --- Parse boluses and SMBs ---
+    for t in treatments:
+        insulin = t.get("insulin")
+        if not insulin or insulin <= 0:
+            continue
+        event_type = t.get("eventType", "")
+        if event_type == "Temp Basal":
+            continue  # Already handled
+
+        created = t.get("created_at", "")
+        if not created:
+            continue
+        try:
+            dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            continue
+
+        is_smb = event_type == "SMB" or (
+            t.get("enteredBy", "").lower().startswith("trio") and insulin < 1.0
+        )
+
+        events.append(InsulinEvent(
+            time=dt.timestamp(),
+            event_type="smb" if is_smb else "bolus",
+            units=float(insulin),
+            rate=0.0,
+            duration_min=0.0,
+        ))
+
+    events.sort(key=lambda e: e.time)
+    return events
+
+
+def _get_scheduled_rate(sorted_schedule: List[dict], seconds_from_midnight: int) -> float:
+    """Get the scheduled basal rate for a given time of day."""
+    rate = sorted_schedule[0]["value"]  # Default to first entry
+    for entry in sorted_schedule:
+        if entry["timeAsSeconds"] <= seconds_from_midnight:
+            rate = entry["value"]
+        else:
+            break
+    return rate
+
+
+# ─── Layer 2: Deviation Analysis ──────────────────────────────────────────────
+
+def _insulin_timeline_to_pump_history(insulin_timeline: List[InsulinEvent]) -> List[dict]:
+    """Convert InsulinEvent list to Trio-format pump history for find_insulin()."""
+    history = []
+    for evt in insulin_timeline:
+        ts_iso = datetime.fromtimestamp(evt.time, tz=timezone.utc).isoformat()
+        if evt.event_type == "basal":
+            history.append({
+                "_type": "TempBasal",
+                "timestamp": ts_iso,
+                "rate": evt.rate,
+                "duration": evt.duration_min,
+            })
+        else:  # bolus or smb
+            history.append({
+                "_type": "Bolus",
+                "timestamp": ts_iso,
+                "amount": evt.units,
+            })
+    return history
+
+
+def _build_trio_profile(profile_settings: dict, basal_schedule: List[dict]) -> dict:
+    """Build a minimal Trio-compatible profile dict for iob_total()."""
+    dia = profile_settings.get("duration_of_insulin_action", 6.0)
+    current_basal = profile_settings.get("basal_rate", 1.0)
+
+    # Build basalprofile in Trio format: [{minutes, rate}, ...]
+    basalprofile = []
+    for entry in sorted(basal_schedule, key=lambda e: e["timeAsSeconds"]):
+        basalprofile.append({
+            "minutes": entry["timeAsSeconds"] // 60,
+            "rate": entry["value"],
+        })
+
+    return {
+        "dia": dia,
+        "curve": "rapid-acting",
+        "current_basal": current_basal,
+        "basalprofile": basalprofile,
+    }
+
+
+def compute_deviations(
+    cgm_entries: List[dict],
+    insulin_timeline: List[InsulinEvent],
+    profile_settings: dict,
+    basal_schedule: List[dict],
+    tz: ZoneInfo,
+) -> List[dict]:
+    """Compute BG deviations at each 5-min CGM point.
+
+    At each point: deviation = observed_delta - BGI (insulin-predicted delta).
+
+    Returns list of dicts: [{time_ms, local_hour, sgv, delta, bgi, deviation}, ...]
+    """
+    print(f"\n{'='*70}")
+    print("Layer 2, Step 1: Computing Deviations")
+    print(f"{'='*70}")
+
+    # Sort CGM entries by time
+    valid_cgm = []
+    for e in cgm_entries:
+        sgv = e.get("sgv")
+        date_ms = e.get("date")
+        if sgv and date_ms and sgv > 0:
+            valid_cgm.append({"sgv": sgv, "date_ms": date_ms})
+    valid_cgm.sort(key=lambda x: x["date_ms"])
+
+    if len(valid_cgm) < 2:
+        print("  Not enough CGM data for deviation analysis.")
+        return []
+
+    # Convert insulin timeline to pump history format
+    pump_history = _insulin_timeline_to_pump_history(insulin_timeline)
+
+    # Build Trio-compatible profile
+    trio_profile = _build_trio_profile(profile_settings, basal_schedule)
+    isf = profile_settings.get("insulin_sensitivity_factor", 100.0)
+
+    # Pre-compute treatments once (find_insulin is expensive to call per-point)
+    # We'll call iob_total at each CGM time using the full treatment list
+    # Use a far-future clock so all events are "in the past" for find_insulin
+    if pump_history:
+        max_time_ms = max(e["date_ms"] for e in valid_cgm) + 60000
+        treatments = find_insulin(pump_history, trio_profile, max_time_ms)
+    else:
+        treatments = []
+
+    print(f"  CGM points: {len(valid_cgm)}")
+    print(f"  Insulin treatments (micro-boluses): {len(treatments)}")
+
+    deviations = []
+    for i in range(1, len(valid_cgm)):
+        prev = valid_cgm[i - 1]
+        curr = valid_cgm[i]
+
+        # Only process ~5-min intervals (allow 3-7 min)
+        dt_min = (curr["date_ms"] - prev["date_ms"]) / 60000.0
+        if dt_min < 3 or dt_min > 7:
+            continue
+
+        # Observed BG change
+        delta = curr["sgv"] - prev["sgv"]
+
+        # Get insulin activity at this point
+        iob_result = iob_total(treatments, curr["date_ms"], trio_profile)
+        activity = iob_result.get("activity", 0)
+
+        # BGI = expected BG change from insulin (activity is U/min)
+        bgi = -activity * isf * 5.0
+
+        deviation = delta - bgi
+
+        local_dt = datetime.fromtimestamp(
+            curr["date_ms"] / 1000, tz=timezone.utc
+        ).astimezone(tz)
+
+        deviations.append({
+            "time_ms": curr["date_ms"],
+            "local_hour": local_dt.hour,
+            "local_date": local_dt.date().isoformat(),
+            "sgv": curr["sgv"],
+            "delta": round(delta, 2),
+            "bgi": round(bgi, 2),
+            "deviation": round(deviation, 2),
+        })
+
+    print(f"  Valid deviations computed: {len(deviations)}")
+    if deviations:
+        devs = [d["deviation"] for d in deviations]
+        print(f"  Deviation stats: mean={np.mean(devs):.1f}, "
+              f"sd={np.std(devs):.1f}, "
+              f"median={np.median(devs):.1f}")
+
+    return deviations
+
+
+def estimate_sensitivity_sigma(
+    deviations: List[dict],
+    carb_times_ms: List[int],
+    tz: ZoneInfo,
+) -> float:
+    """Estimate daily ISF variation from non-meal deviations.
+
+    Classifies deviations as meal-related (within 3h of declared carb) or non-meal.
+    Groups non-meal deviations by day, computes daily median → sensitivity ratio.
+    Returns SD of daily ratios.
+    """
+    print(f"\n{'='*70}")
+    print("Layer 2, Step 2: Sensitivity Sigma")
+    print(f"{'='*70}")
+
+    MEAL_WINDOW_MS = 3 * 3600 * 1000  # 3 hours
+
+    # Classify deviations
+    non_meal_by_day = defaultdict(list)
+    n_meal = 0
+    n_nonmeal = 0
+
+    for d in deviations:
+        # Check if within meal window
+        is_meal = any(
+            0 <= (d["time_ms"] - ct) <= MEAL_WINDOW_MS
+            for ct in carb_times_ms
+        )
+        if is_meal:
+            n_meal += 1
+            continue
+
+        n_nonmeal += 1
+        non_meal_by_day[d["local_date"]].append(d["deviation"])
+
+    print(f"  Meal-related deviations: {n_meal}")
+    print(f"  Non-meal deviations: {n_nonmeal}")
+    print(f"  Days with non-meal data: {len(non_meal_by_day)}")
+
+    if len(non_meal_by_day) < 3:
+        print("  Not enough days for sensitivity estimate, using default 0.15")
+        return 0.15
+
+    # Per-day median deviation → proxy for daily sensitivity shift
+    daily_medians = []
+    for day, devs in sorted(non_meal_by_day.items()):
+        med = float(np.median(devs))
+        daily_medians.append(med)
+
+    # Global median (expected ~0 if ISF is correct on average)
+    global_median = float(np.median(daily_medians))
+
+    # Convert deviations to ratios: ratio = 1 + (median_dev / typical_bg_change)
+    # A typical 5-min BG change from basal insulin is small (~1-2 mg/dL)
+    # We use the SD of daily medians relative to the global median
+    # as a proxy for sensitivity_sigma
+    centered = np.array(daily_medians) - global_median
+
+    # Convert to fractional variation: SD of deviation / typical ISF effect
+    # The SD of daily median deviations, divided by a reference BG range,
+    # gives the fractional sensitivity variation
+    # Use IQR-based estimate for robustness
+    q75, q25 = np.percentile(centered, [75, 25])
+    iqr = q75 - q25
+    robust_sd = iqr / 1.35  # IQR to SD conversion for normal distribution
+
+    # Normalize by typical ISF magnitude to get fractional sigma
+    # Median absolute deviation of daily medians / reference scale
+    # Reference: a 1-sigma sensitivity shift changes BG by ~ISF * basal_daily_dose
+    # Simpler: use the ratio of robust_sd to the absolute global median + offset
+    # to avoid division by near-zero
+    reference_scale = max(abs(global_median), 2.0) + robust_sd
+    sigma = robust_sd / reference_scale
+
+    # Clamp to reasonable range
+    sigma = max(0.03, min(sigma, 0.50))
+
+    print(f"  Daily median deviations: mean={np.mean(daily_medians):.2f}, "
+          f"sd={np.std(daily_medians):.2f}")
+    print(f"  Global median: {global_median:.2f}")
+    print(f"  Robust SD (IQR-based): {robust_sd:.2f}")
+    print(f"  → sensitivity_sigma: {sigma:.3f}")
+
+    return round(sigma, 3)
+
+
+def estimate_carb_counting_error(
+    deviations: List[dict],
+    carb_entries: List[dict],
+    carb_times_ms: List[int],
+    profile_settings: dict,
+) -> Tuple[float, float]:
+    """Estimate carb counting sigma and bias using daily totals.
+
+    Per-meal analysis fails when carb entries are frequent and their absorption
+    windows overlap (92% of entries in typical grazing pattern). Instead, we
+    compare daily total declared carbs to daily total implied carbs (from
+    baseline-adjusted positive deviations), which avoids double-counting.
+
+    Returns (sigma, bias) for lognormal carb counting error model.
+    """
+    print(f"\n{'='*70}")
+    print("Layer 2, Step 3: Carb Counting Error")
+    print(f"{'='*70}")
+
+    isf = profile_settings.get("insulin_sensitivity_factor", 100.0)
+    cr = profile_settings.get("carb_ratio", 10.0)
+    csf = isf / cr  # mg/dL per gram of carbs
+
+    MEAL_EXCLUDE_MS = 3 * 3600 * 1000
+
+    # Compute baseline: median non-meal deviation
+    non_meal_devs = []
+    for d in deviations:
+        near_carb = any(
+            0 <= (d["time_ms"] - ct) <= MEAL_EXCLUDE_MS
+            for ct in carb_times_ms
+        )
+        if not near_carb:
+            non_meal_devs.append(d["deviation"])
+
+    baseline = float(np.median(non_meal_devs)) if non_meal_devs else 0.0
+    print(f"  Baseline deviation (non-meal median): {baseline:.2f} mg/dL/5min")
+
+    # Group declared carbs by day
+    daily_declared = defaultdict(float)
+    for t in carb_entries:
+        carbs = t.get("carbs", 0)
+        if not carbs or carbs <= 0:
+            continue
+        created = t.get("created_at", "")
+        if not created:
+            continue
+        try:
+            dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            continue
+        day = dt.date().isoformat()
+        daily_declared[day] += carbs
+
+    # Group baseline-adjusted positive deviations by day → implied carbs
+    daily_pos_dev_sum = defaultdict(float)
+    daily_dev_count = defaultdict(int)
+    for d in deviations:
+        adjusted = d["deviation"] - baseline
+        daily_dev_count[d["local_date"]] += 1
+        if adjusted > 0:
+            daily_pos_dev_sum[d["local_date"]] += adjusted
+
+    # Compute daily ratios (implied/declared)
+    log_ratios = []
+    print(f"\n  {'Day':<12} {'Declared':>10} {'Implied':>10} {'Ratio':>8}")
+    print(f"  {'-'*42}")
+    for day in sorted(daily_declared.keys()):
+        declared = daily_declared[day]
+        if declared < 10:  # Skip days with very few declared carbs
+            continue
+        if daily_dev_count.get(day, 0) < 100:  # Need ~8h of CGM data
+            continue
+
+        implied = daily_pos_dev_sum.get(day, 0) / csf
+        if implied < 1:
+            continue
+
+        ratio = implied / declared
+        log_ratios.append(math.log(ratio))
+        print(f"  {day}   {declared:>8.0f}g   {implied:>8.0f}g   {ratio:>7.2f}x")
+
+    print(f"\n  Analyzable days: {len(log_ratios)}")
+
+    if len(log_ratios) < 5:
+        print("  Not enough days for reliable estimate, using defaults")
+        return 0.15, 0.0
+
+    log_ratios_arr = np.array(log_ratios)
+
+    # sigma = SD of log-ratios (day-to-day variation in counting accuracy)
+    sigma = float(np.std(log_ratios_arr))
+
+    # bias = mean(log-ratios)
+    # log-ratio = log(actual/declared). Positive mean → actual > declared → under-declaration
+    # Sim model: declared = actual * exp(N(-bias, sigma))
+    # So positive bias → exp(-bias) < 1 → declared < actual ✓
+    bias = float(np.mean(log_ratios_arr))
+
+    # Clamp to reasonable ranges
+    sigma = max(0.03, min(sigma, 0.60))
+    bias = max(-1.0, min(bias, 1.0))
+
+    implied_ratios = np.exp(log_ratios_arr)
+    print(f"  Daily implied/declared ratio: median={np.median(implied_ratios):.2f}x, "
+          f"mean={np.mean(implied_ratios):.2f}x")
+    print(f"  Log-ratio stats: mean={np.mean(log_ratios_arr):.3f}, "
+          f"sd={np.std(log_ratios_arr):.3f}")
+    print(f"  → carb_count_sigma: {sigma:.3f}")
+    print(f"  → carb_count_bias: {bias:.3f}")
+
+    return round(sigma, 3), round(bias, 3)
+
+
+def detect_undeclared_meals(
+    deviations: List[dict],
+    carb_times_ms: List[int],
+    tz: ZoneInfo,
+    n_days: int,
+    profile_settings: dict,
+) -> Tuple[float, List[dict]]:
+    """Detect undeclared meals from unexplained positive deviation clusters.
+
+    Finds consecutive positive deviations (>3 mg/dL/5min) not within 4h of
+    a declared carb. Each cluster → one undeclared meal.
+
+    Returns (undeclared_meal_prob, undeclared_meal_specs).
+    """
+    print(f"\n{'='*70}")
+    print("Layer 2, Step 4: Undeclared Meal Detection")
+    print(f"{'='*70}")
+
+    isf = profile_settings.get("insulin_sensitivity_factor", 100.0)
+    cr = profile_settings.get("carb_ratio", 10.0)
+    csf = isf / cr
+
+    DECLARED_WINDOW_MS = 4 * 3600 * 1000  # Exclude 4h around declared carbs
+    MIN_DEVIATION = 3.0  # mg/dL/5min threshold
+    MIN_CLUSTER_POINTS = 3  # At least 15 min of positive deviations
+
+    # Find deviations NOT near declared carbs and above threshold
+    uam_candidates = []
+    for d in deviations:
+        near_carb = any(
+            -30 * 60000 <= (d["time_ms"] - ct) <= DECLARED_WINDOW_MS
+            for ct in carb_times_ms
+        )
+        if not near_carb and d["deviation"] > MIN_DEVIATION:
+            uam_candidates.append(d)
+
+    print(f"  UAM candidate points (dev > {MIN_DEVIATION}, not near carbs): "
+          f"{len(uam_candidates)}")
+
+    if not uam_candidates:
+        print("  No undeclared meal evidence found.")
+        return 0.0, []
+
+    # Cluster consecutive candidates (gap <= 10 min)
+    MAX_GAP_MS = 10 * 60000
+    clusters = []
+    current_cluster = [uam_candidates[0]]
+
+    for i in range(1, len(uam_candidates)):
+        if uam_candidates[i]["time_ms"] - current_cluster[-1]["time_ms"] <= MAX_GAP_MS:
+            current_cluster.append(uam_candidates[i])
+        else:
+            if len(current_cluster) >= MIN_CLUSTER_POINTS:
+                clusters.append(current_cluster)
+            current_cluster = [uam_candidates[i]]
+
+    if len(current_cluster) >= MIN_CLUSTER_POINTS:
+        clusters.append(current_cluster)
+
+    print(f"  UAM clusters (≥{MIN_CLUSTER_POINTS} points): {len(clusters)}")
+
+    if not clusters:
+        print("  No significant undeclared meal clusters found.")
+        return 0.0, []
+
+    # Estimate carbs and timing for each cluster
+    n_declared = len(carb_times_ms)
+    n_undeclared = len(clusters)
+
+    if n_declared + n_undeclared > 0:
+        prob = n_undeclared / (n_declared + n_undeclared)
+    else:
+        prob = 0.0
+
+    # Group clusters by hour to build meal specs
+    hourly_carbs = defaultdict(list)
+    for cluster in clusters:
+        sum_dev = sum(p["deviation"] for p in cluster)
+        implied_carbs = sum_dev / csf
+        # Use start time of cluster
+        local_dt = datetime.fromtimestamp(
+            cluster[0]["time_ms"] / 1000, tz=timezone.utc
+        ).astimezone(tz)
+        hourly_carbs[local_dt.hour].append(implied_carbs)
+
+    # Build undeclared meal specs from most common hours
+    meal_specs = []
+    for hour in sorted(hourly_carbs.keys()):
+        carbs_list = hourly_carbs[hour]
+        if len(carbs_list) < 2:
+            continue  # Need at least 2 events to establish a pattern
+
+        mean_carbs = float(np.mean(carbs_list))
+        if mean_carbs < 5:
+            continue  # Skip tiny clusters
+
+        time_of_day_minutes = (hour * 60 + 30 - 7 * 60) % 1440  # Mid-hour, relative to 7am
+        spec = {
+            "time_of_day_minutes": time_of_day_minutes,
+            "carbs_mean": round(mean_carbs, 1),
+            "carbs_sd": round(float(np.std(carbs_list)), 1) if len(carbs_list) > 1 else round(mean_carbs * 0.3, 1),
+            "absorption_hrs": 3.0,
+        }
+        meal_specs.append(spec)
+        print(f"    Hour {hour:02d}: {len(carbs_list)} events, "
+              f"mean={mean_carbs:.0f}g implied carbs")
+
+    prob = round(max(0.0, min(prob, 0.8)), 2)
+
+    print(f"\n  Declared meals: {n_declared} ({n_declared / max(1,n_days):.1f}/day)")
+    print(f"  Undeclared meals: {n_undeclared} ({n_undeclared / max(1,n_days):.1f}/day)")
+    print(f"  → undeclared_meal_prob: {prob:.2f}")
+    print(f"  → undeclared_meals specs: {len(meal_specs)} slots")
+
+    return prob, meal_specs
+
+
+# ─── CLI ──────────────────────────────────────────────────────────────────────
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Infer a PatientProfile from Nightscout data"
+    )
+    parser.add_argument("--url", type=str, required=True,
+                        help="Nightscout URL")
+    parser.add_argument("--days", type=int, default=28,
+                        help="Days of history to analyze (default 28)")
+    parser.add_argument("--token", type=str, default=None,
+                        help="API access token")
+    parser.add_argument("--output", type=str,
+                        default="patient_profiles/ns_inferred.json",
+                        help="Output path (default patient_profiles/ns_inferred.json)")
+    parser.add_argument("--no-layer2", action="store_true",
+                        help="Skip Layer 2 deviation analysis (use defaults)")
+    args = parser.parse_args()
+
+    build_profile(
+        url=args.url,
+        days=args.days,
+        token=args.token,
+        output_path=args.output,
+        layer2=not args.no_layer2,
+    )
+
+
+if __name__ == "__main__":
+    main()

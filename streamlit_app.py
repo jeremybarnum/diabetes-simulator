@@ -14,6 +14,7 @@ from pathlib import Path
 
 from simulation import PatientProfile, MealSpec, ExerciseSpec, SimulationRun, SimulationRunResult
 from monte_carlo import compute_metrics, GlycemicMetrics, _algo_seed_offset, _profile_to_dict, build_variants
+from nightscout_profile import build_profile as ns_build_profile
 
 try:
     import modal
@@ -295,6 +296,17 @@ selected_profile_name = st.sidebar.selectbox(
 )
 profile_path = profile_names[selected_profile_name]
 
+# Delete profile
+if st.sidebar.button("Delete Profile", help="Permanently delete the currently selected profile."):
+    protected = {"default", "real_patient"}
+    stem = Path(profile_path).stem
+    if stem in protected:
+        st.sidebar.error(f"Cannot delete built-in profile **{selected_profile_name}**.")
+    else:
+        Path(profile_path).unlink()
+        st.sidebar.success(f"Deleted **{selected_profile_name}**. Reloading...")
+        st.rerun()
+
 # Additional profiles for multi-profile comparison
 additional_profile_names = st.sidebar.multiselect(
     "Additional Profiles to Compare",
@@ -534,8 +546,9 @@ def get_variant_colors(variant_labels):
         colors[label] = EXTENDED_COLORS[i % len(EXTENDED_COLORS)]
     return colors
 
-tab_results, tab_patient, tab_algo, tab_help = st.tabs([
-    "Results", "Patient Model", "Algorithm & Therapy Settings", "Help",
+tab_results, tab_patient, tab_algo, tab_ns, tab_help = st.tabs([
+    "Results", "Patient Model", "Algorithm & Therapy Settings",
+    "Import from Nightscout", "Help",
 ])
 
 # ─── Tab 2: Patient Model ────────────────────────────────────────────────────
@@ -593,26 +606,26 @@ with tab_patient:
     with col1:
         st.slider(
             "Carb counting error (sigma)",
-            min_value=0.0, max_value=0.50, step=0.05,
+            min_value=0.0, max_value=1.0, step=0.05,
             help="Lognormal sigma for random carb estimation error",
             key="carb_count_sigma_sl",
         )
         st.slider(
             "Absorption estimate error (sigma)",
-            min_value=0.0, max_value=0.30, step=0.05,
+            min_value=0.0, max_value=1.0, step=0.05,
             help="Lognormal sigma for absorption time estimation error",
             key="absorption_sigma_sl",
         )
     with col2:
         st.slider(
-            "Systematic under-declaration bias",
-            min_value=0.0, max_value=0.30, step=0.05,
-            help="Positive = patient systematically under-declares carbs",
+            "Systematic carb-counting bias",
+            min_value=-1.0, max_value=1.0, step=0.05,
+            help="Positive = patient under-declares carbs, negative = over-declares",
             key="carb_count_bias_sl",
         )
         st.slider(
             "Probability meal goes undeclared",
-            min_value=0.0, max_value=0.50, step=0.05,
+            min_value=0.0, max_value=1.0, step=0.05,
             help="Chance that any given meal is eaten but not bolused",
             key="undeclared_meal_prob_sl",
         )
@@ -622,7 +635,7 @@ with tab_patient:
     st.subheader("Sensitivity Variation")
     st.slider(
         "Daily sensitivity variation (sigma)",
-        min_value=0.0, max_value=0.40, step=0.05,
+        min_value=0.0, max_value=1.0, step=0.05,
         help="Lognormal sigma for day-to-day insulin sensitivity variation",
         key="sensitivity_sigma_sl",
     )
@@ -904,6 +917,114 @@ with tab_algo:
             help="Controls the aggressiveness of sigmoid dynamic ISF. "
                  "Lower = gentler adjustments, higher = more aggressive.",
         )
+
+
+# ─── Tab 4: Import from Nightscout ───────────────────────────────────────────
+
+_ns_config_path = Path(__file__).parent / ".ns_config.json"
+
+def _load_ns_config():
+    if _ns_config_path.exists():
+        try:
+            with open(_ns_config_path) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+def _save_ns_config(cfg):
+    with open(_ns_config_path, "w") as f:
+        json.dump(cfg, f)
+
+# Seed session state from saved config on first load
+if "ns_url_in" not in st.session_state:
+    _cfg = _load_ns_config()
+    if _cfg.get("url"):
+        st.session_state["ns_url_in"] = _cfg["url"]
+    if _cfg.get("token"):
+        st.session_state["ns_token_in"] = _cfg["token"]
+
+with tab_ns:
+    st.subheader("Import Profile from Nightscout")
+    st.caption("Pull real meal/bolus/CGM data and auto-generate a patient profile.")
+
+    ns_url = st.text_input("Nightscout URL", key="ns_url_in",
+                           placeholder="https://your-ns-site.nightscoutpro.com")
+    col1, col2 = st.columns(2)
+    with col1:
+        ns_token = st.text_input("API Token (optional)", key="ns_token_in", type="password")
+        ns_days = st.number_input("Days of history", value=28, min_value=7, max_value=90, key="ns_days_in")
+    with col2:
+        ns_profile_name = st.text_input("Save as profile name", value="ns_inferred", key="ns_name_in")
+
+    import_button = st.button("Import from Nightscout", type="primary")
+
+    if import_button:
+        if not ns_url or not ns_url.startswith("http"):
+            st.error("Enter a valid Nightscout URL.")
+        else:
+            url = ns_url.rstrip("/")
+            token = ns_token or None
+            filename = ns_profile_name.strip().lower().replace(" ", "_")
+            if not filename:
+                filename = "ns_inferred"
+            save_path = str(profile_dir / f"{filename}.json")
+
+            import io, contextlib
+            log_buffer = io.StringIO()
+            with st.spinner("Fetching data from Nightscout..."):
+                try:
+                    with contextlib.redirect_stdout(log_buffer):
+                        profile_dict = ns_build_profile(url, days=ns_days, token=token, output_path=save_path)
+                except Exception as e:
+                    st.error(f"Import failed: {e}")
+                    with st.expander("Full log"):
+                        st.code(log_buffer.getvalue())
+                    st.stop()
+
+            # Persist NS URL/token for future sessions
+            _save_ns_config({"url": url, "token": token or ""})
+
+            st.success(f"Profile saved to **{filename}.json**")
+
+            # Algorithm settings
+            st.subheader("Extracted Algorithm Settings")
+            algo = profile_dict.get("algorithm_settings", {})
+            sc1, sc2, sc3, sc4 = st.columns(4)
+            sc1.metric("ISF", f"{algo.get('insulin_sensitivity_factor', '?')} mg/dL/U")
+            sc2.metric("Carb Ratio", f"{algo.get('carb_ratio', '?')} g/U")
+            sc3.metric("Basal Rate", f"{algo.get('basal_rate', '?')} U/hr")
+            sc4.metric("Target BG", f"{algo.get('target', '?')} mg/dL")
+
+            # Detected meals
+            st.subheader("Detected Meals")
+            meals = profile_dict.get("meals", [])
+            if meals:
+                meal_rows = []
+                for m in meals:
+                    clock = _minutes_to_clock(m["time_of_day_minutes"])
+                    meal_rows.append({"Time": clock, "Avg Carbs (g)": m["carbs_mean"],
+                                      "SD (g)": m["carbs_sd"], "Absorption (hrs)": m["absorption_hrs"]})
+                st.dataframe(pd.DataFrame(meal_rows), use_container_width=True)
+            else:
+                st.info("No meal patterns detected.")
+
+            # Exercise
+            epw = profile_dict.get("exercises_per_week", 0)
+            if epw > 0:
+                st.subheader("Exercise")
+                ex = profile_dict.get("exercise_spec", {})
+                st.write(f"**{epw}x/week** at {_minutes_to_clock(ex.get('time_of_day_minutes', 0))}")
+
+            # Starting BG
+            st.metric("Starting BG (morning median)", f"{profile_dict.get('starting_bg', '?')} mg/dL")
+
+            # Full log
+            with st.expander("Full import log"):
+                st.code(log_buffer.getvalue())
+
+            display_name = filename.replace("_", " ").title()
+            st.info(f"**Reload the page** (Ctrl-R / Cmd-R), then select **{display_name}** from the **Load Profile** dropdown in the sidebar.")
 
 
 # ─── Tab 1: Results ──────────────────────────────────────────────────────────

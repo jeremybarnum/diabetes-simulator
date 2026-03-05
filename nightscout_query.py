@@ -355,6 +355,98 @@ def analyze_temp_targets(treatments: List[Dict]):
                   f"reason={tt.get('reason', '')}")
 
 
+def fetch_profile(
+    base_url: str,
+    token: Optional[str] = None,
+) -> Dict:
+    """Fetch the Nightscout profile (basal, CR, ISF, targets, DIA, timezone).
+
+    Returns the default (most recent) profile store entry.
+    """
+    url = f"{base_url}/api/v1/profile.json"
+    params = {}
+    headers = {"Accept": "application/json"}
+    if token:
+        params["token"] = token
+
+    resp = requests.get(url, headers=headers, params=params, timeout=30)
+    resp.raise_for_status()
+    profiles = resp.json()
+    if not profiles:
+        raise ValueError("No profiles found in Nightscout")
+
+    # Return the most recent profile store entry
+    store = profiles[0].get("store", {})
+    # Get the default profile (usually the first/only key)
+    default_name = profiles[0].get("defaultProfile", next(iter(store)))
+    return store.get(default_name, next(iter(store.values())))
+
+
+def fetch_boluses(
+    base_url: str,
+    start_date: datetime,
+    end_date: datetime,
+    token: Optional[str] = None,
+    count: int = 50000,
+) -> List[Dict]:
+    """Fetch bolus and SMB treatments from Nightscout."""
+    bolus_types = [
+        "Bolus",
+        "Correction Bolus",
+        "Meal Bolus",
+        "SMB",
+    ]
+    all_boluses = []
+    for event_type in bolus_types:
+        treatments = fetch_treatments(
+            base_url, start_date, end_date, token=token,
+            find_filter={"find[eventType]": event_type},
+            count=count,
+        )
+        all_boluses.extend(treatments)
+
+    # Also grab any treatment with an insulin field but no specific eventType match
+    all_treatments = fetch_treatments(
+        base_url, start_date, end_date, token=token, count=count,
+    )
+    seen_ids = {t.get("_id") for t in all_boluses}
+    for t in all_treatments:
+        if t.get("insulin") and t.get("insulin") > 0 and t.get("_id") not in seen_ids:
+            all_boluses.append(t)
+
+    return all_boluses
+
+
+def fetch_temp_basals(
+    base_url: str,
+    start_date: datetime,
+    end_date: datetime,
+    token: Optional[str] = None,
+    count: int = 50000,
+) -> List[Dict]:
+    """Fetch temp basal treatments from Nightscout."""
+    return fetch_treatments(
+        base_url, start_date, end_date, token=token,
+        find_filter={"find[eventType]": "Temp Basal"},
+        count=count,
+    )
+
+
+def fetch_exercise(
+    base_url: str,
+    start_date: datetime,
+    end_date: datetime,
+    token: Optional[str] = None,
+    count: int = 10000,
+) -> List[Dict]:
+    """Fetch exercise treatments from Nightscout."""
+    return fetch_treatments(
+        base_url, start_date, end_date, token=token,
+        find_filter={"find[eventType]": "Exercise"},
+        count=count,
+    )
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="Query Nightscout for patient stats")
