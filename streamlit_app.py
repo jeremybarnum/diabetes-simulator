@@ -1236,9 +1236,13 @@ with tab_help:
     st.markdown("""
 ## Quick Start
 
-1. **Pick a profile** — select a patient profile from the sidebar (e.g., "Real Patient")
+1. **Pick a profile** — select a patient profile from the sidebar (e.g., "Real Patient"),
+   or import one from Nightscout
 2. **Tweak settings** — adjust meals, carb counting ability, and algorithm settings in the tabs
 3. **Run** — click **Run Simulation** to generate Monte Carlo results
+
+To compare the same algorithm across different patient profiles, select additional profiles
+in the sidebar under **Additional Profiles to Compare**.
 
 ---
 
@@ -1252,7 +1256,9 @@ Each 5-minute step:
    basal deficit (if sensitivity differs from the algorithm's assumption)
 2. **The algorithm** sees the CGM reading and its own insulin/carb history, then decides
    whether to adjust the temp basal, deliver a micro-bolus, or suspend delivery
-3. If BG drops below 70, the simulated patient eats 8g rescue carbs (undeclared)
+3. If BG drops below the rescue threshold (default 70), the simulated patient eats rescue
+   carbs. Rescue carb behavior is configurable — amount, absorption speed, cooldown, and
+   what percentage the patient declares to the pump
 
 Every path draws fresh random values for meal sizes, carb counting errors, insulin
 sensitivity, and exercise — so the collection of paths shows the range of outcomes you'd
@@ -1312,6 +1318,34 @@ The patient model introduces realistic sources of randomness that challenge the 
   doesn't know today's true sensitivity, creating a "basal deficit" that drifts BG
 - **Exercise mismatch** — the patient tells the pump about exercise, but the actual
   sensitivity change and duration differ from what was declared
+- **Rescue carbs** — when BG drops below a threshold, the patient eats fast-acting carbs.
+  You can configure how much, how fast they absorb, cooldown between doses, and what
+  fraction the patient declares to the pump (0% = fully invisible to the algorithm)
+
+---
+
+## Importing from Nightscout
+
+The **Import from Nightscout** tab pulls real data from a Nightscout instance and
+auto-generates a patient profile:
+
+- Detects recurring meal patterns (timing, average carbs, variability)
+- Extracts therapy settings (ISF, CR, basal rate, target)
+- Estimates carb counting accuracy and sensitivity variation from historical data
+- Detects exercise patterns
+
+This lets you simulate how different algorithms would perform for a real patient based
+on their actual eating and dosing patterns.
+
+---
+
+## Multi-Profile Comparison
+
+You can compare the same algorithm(s) across different patient profiles by selecting
+**Additional Profiles to Compare** in the sidebar. Each combination of algorithm and
+profile becomes a "variant" — for example, running Loop and Trio against both a
+"Real Patient" and "High Carb" profile produces four variants, each plotted and scored
+independently.
 
 ---
 
@@ -1332,8 +1366,8 @@ performance; wide spread = high variability.
 - **Hypo events/path** — average distinct hypoglycemia episodes (3+ consecutive readings below 70)
 
 ### Head-to-Head
-When exactly 2 algorithms are selected, each paired path is compared: which had higher TIR,
-which had less time below 70. This controls for randomness — both algorithms face the
+When exactly 2 variants are selected, each paired path is compared: which had higher TIR,
+which had less time below 70. This controls for randomness — both variants face the
 exact same patient on each path.
 
 ---

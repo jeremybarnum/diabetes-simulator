@@ -169,7 +169,7 @@ Each 5-minute step, the patient's BG changes based on three components:
 
 3. **Basal deficit**: when the patient's true sensitivity `S(t) ≠ 1`, the scheduled basal rate is wrong for the patient's actual needs. If `S(t) > 1` (more resistant), the pump under-delivers relative to need, causing BG to drift up. If `S(t) < 1` (more sensitive), the pump over-delivers. This is modeled as a "virtual insulin" injection the algorithm cannot see.
 
-BG is clamped to [39, 400] mg/dL. If BG drops below 70, the patient automatically eats 8g rescue carbs (undeclared, 1-hour absorption) with a 15-minute cooldown.
+BG is clamped to [39, 400] mg/dL. When BG drops below the rescue threshold (default 70 mg/dL), the patient automatically eats rescue carbs. Rescue behavior is fully configurable: the threshold, carb amount (default 8g), absorption time (default 1 hour), cooldown between doses (default 15 minutes), and what percentage of rescue carbs the patient declares to the pump (default 0% — fully invisible to the algorithm). Setting the declared percentage above zero models a patient who enters their rescue carbs, giving the algorithm better information but also introducing potential insulin stacking.
 
 ### Sources of Randomness
 
@@ -313,10 +313,13 @@ The patient model evolved through several iterations:
 
 Streamlit was chosen for the web UI because it provides a fast path from Python simulation code to an interactive app with minimal frontend work. Key implementation choices:
 
-- **Tabbed layout** separates results, patient model editing, and algorithm settings, keeping the interface manageable despite many parameters
+- **Tabbed layout** separates results, patient model editing, algorithm settings, Nightscout import, and help, keeping the interface manageable despite many parameters
 - **`st.data_editor`** for meal tables allows users to add, remove, and edit meals directly in the browser
 - **Session state management** bridges the gap between Streamlit's rerun model and the need to persist editable state — profile loading writes directly to `st.session_state` keys that widgets read via their `key=` parameters
 - **Patient profiles** are stored as JSON files and can be saved/loaded, making it easy to share and reproduce scenarios
+- **Nightscout import** pulls real meal/bolus/CGM data from a Nightscout instance and auto-generates a patient profile with detected meal patterns, therapy settings, and estimated variability parameters
+- **Multi-profile comparison** allows selecting additional profiles in the sidebar to compare the same algorithm(s) across different patients. Each algorithm × profile combination becomes a "variant" with its own trace and metrics
+- **Multiple insulin types** are supported (Humalog/Novolog, Fiasp, Lyumjev, rapid-acting child, Afrezza), each with different action curve parameters
 
 The app is deployed on Streamlit Community Cloud, which auto-deploys from the GitHub repository.
 
@@ -341,8 +344,8 @@ The entire project was developed using Claude Code (Anthropic's AI coding assist
 
 ## Design Choices
 
-### Why Fiasp?
-Fiasp (faster-acting insulin aspart) is used as the default insulin type because its faster onset and shorter peak make closed-loop performance differences more apparent. The exponential insulin model parameters (peak 55 min, duration 360 min, delay 10 min) are used consistently across both algorithms.
+### Why Fiasp as Default?
+Fiasp (faster-acting insulin aspart) was the original default insulin type because its faster onset and shorter peak make closed-loop performance differences more apparent. The simulator now supports multiple insulin types (Humalog/Novolog, Fiasp, Lyumjev, rapid-acting child, Afrezza), each with different exponential model parameters. The selected insulin type is used consistently across both algorithms.
 
 ### Why Piecewise Linear Carbs?
 The carb absorption model uses a piecewise linear curve (matching iOS Loop's "nonlinear" mode, which is actually piecewise linear). This was chosen because it matches the validated iOS implementation and provides a reasonable approximation of real absorption dynamics with a simple, predictable shape.
@@ -353,5 +356,5 @@ Using identical therapy settings (ISF, CR, basal, DIA, target) for both Loop and
 ### Why Start Each Day Fresh?
 Single-day simulations start with no active insulin or carbs at 7am. This eliminates carry-over effects that could confound comparisons. Multi-day mode is available for scenarios where carry-over matters (e.g., autosens needs 24h of history to be meaningful).
 
-### Why Rescue Carbs at 70?
-The simulated patient automatically eats 8g rescue carbs when BG drops below 70 mg/dL. This prevents unrealistically severe hypoglycemia and models real patient behavior — nobody sits still while their BG crashes. The rescue carbs are undeclared, so the algorithm must detect and respond to the unexpected glucose rise.
+### Why Rescue Carbs?
+The simulated patient automatically eats rescue carbs when BG drops below a configurable threshold (default 70 mg/dL). This prevents unrealistically severe hypoglycemia and models real patient behavior — nobody sits still while their BG crashes. By default, rescue carbs are undeclared, so the algorithm must detect and respond to the unexpected glucose rise. The rescue system is fully configurable: threshold, carb amount, absorption speed, cooldown between doses, and what fraction the patient declares to the pump.
