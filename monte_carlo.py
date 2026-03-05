@@ -501,8 +501,8 @@ def main():
                         help='Comma-separated profile JSON paths for multi-profile comparison')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed')
-    parser.add_argument('--workers', type=int, default=1,
-                        help='Parallel workers (1=sequential)')
+    parser.add_argument('--workers', type=int, default=0,
+                        help='Parallel workers (0=auto/cpu_count, 1=sequential)')
     args = parser.parse_args()
 
     profiles_list = _load_profiles(args)
@@ -520,13 +520,18 @@ def main():
     print(f"Meals/day: {len(profile.meals)}")
     print()
 
+    workers = args.workers
+    if workers <= 0:
+        import os
+        workers = os.cpu_count() or 4
+
     results = run_monte_carlo(
         profile=profile,
         algorithms=args.algorithms,
         n_paths=args.paths,
         n_days=args.days,
         seed=args.seed,
-        max_workers=args.workers,
+        max_workers=workers,
         profiles=profiles_list,
     )
 
