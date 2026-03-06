@@ -382,6 +382,59 @@ def fetch_profile(
     return store.get(default_name, next(iter(store.values())))
 
 
+def fetch_profile_history(
+    base_url: str,
+    token: Optional[str] = None,
+    count: int = 1000,
+) -> List[Dict]:
+    """Fetch full profile history from Nightscout, sorted by startDate ascending.
+
+    Each entry has 'startDate' (ISO string) and the profile data (basal, CR, ISF, etc.).
+    Returns list of (startDate_iso, profile_data) tuples.
+    """
+    url = f"{base_url}/api/v1/profile.json"
+    params = {"count": count}
+    headers = {"Accept": "application/json"}
+    if token:
+        params["token"] = token
+
+    resp = requests.get(url, headers=headers, params=params, timeout=30)
+    resp.raise_for_status()
+    profiles = resp.json()
+    if not profiles:
+        return []
+
+    result = []
+    for p in profiles:
+        start_date = p.get("startDate", "")
+        store = p.get("store", {})
+        default_name = p.get("defaultProfile", next(iter(store), ""))
+        profile_data = store.get(default_name, next(iter(store.values()), {}))
+        if start_date and profile_data:
+            result.append({
+                "startDate": start_date,
+                **profile_data,
+            })
+
+    # Sort ascending by startDate
+    result.sort(key=lambda x: x["startDate"])
+
+    # Deduplicate: keep only entries where settings actually changed
+    deduped = []
+    prev_key = None
+    for entry in result:
+        key = (
+            tuple((s.get("value"), s.get("timeAsSeconds")) for s in entry.get("sens", [])),
+            tuple((s.get("value"), s.get("timeAsSeconds")) for s in entry.get("carbratio", [])),
+            tuple((s.get("value"), s.get("timeAsSeconds")) for s in entry.get("basal", [])),
+        )
+        if key != prev_key:
+            deduped.append(entry)
+            prev_key = key
+
+    return deduped
+
+
 def fetch_boluses(
     base_url: str,
     start_date: datetime,

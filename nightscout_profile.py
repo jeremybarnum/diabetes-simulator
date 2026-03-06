@@ -25,6 +25,7 @@ from zoneinfo import ZoneInfo
 
 from nightscout_query import (
     fetch_profile,
+    fetch_profile_history,
     fetch_treatments,
     fetch_entries,
     fetch_boluses,
@@ -160,6 +161,145 @@ def _seconds_to_hhmm(seconds: int) -> str:
     h = seconds // 3600
     m = (seconds % 3600) // 60
     return f"{h:02d}:{m:02d}"
+
+
+# ─── Profile Timeline ────────────────────────────────────────────────────────
+
+class ProfileTimeline:
+    """Maps any timestamp to the NS profile settings active at that time.
+
+    Built from fetch_profile_history() output (sorted by startDate, deduped).
+    Falls back to the most recent profile if no history covers the requested time.
+    """
+
+    def __init__(self, profile_entries: List[dict], fallback_profile: dict):
+        """
+        Args:
+            profile_entries: sorted list of profile dicts, each with 'startDate' key
+            fallback_profile: profile to use if no history entry covers the time
+        """
+        self._entries = []
+        for entry in profile_entries:
+            sd = entry.get("startDate", "")
+            try:
+                dt = datetime.fromisoformat(sd.replace("Z", "+00:00"))
+            except (ValueError, AttributeError):
+                continue
+            self._entries.append((dt, entry))
+        self._entries.sort(key=lambda x: x[0])
+        self._fallback = fallback_profile
+
+    def get_at(self, dt: datetime) -> dict:
+        """Return the profile active at the given datetime."""
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        active = self._fallback
+        for entry_dt, entry in self._entries:
+            if entry_dt <= dt:
+                active = entry
+            else:
+                break
+        return active
+
+    def get_at_ms(self, time_ms: int) -> dict:
+        """Return the profile active at the given epoch milliseconds."""
+        dt = datetime.fromtimestamp(time_ms / 1000, tz=timezone.utc)
+        return self.get_at(dt)
+
+    def isf_at_ms(self, time_ms: int) -> float:
+        """Return the time-weighted average ISF from the profile active at time_ms."""
+        profile = self.get_at_ms(time_ms)
+        isf_schedule = profile.get("sens", [])
+        if not isf_schedule:
+            return 100.0
+        return _time_weighted_average(isf_schedule, value_key="value")
+
+    def cr_at_ms(self, time_ms: int) -> float:
+        """Return the time-weighted average CR from the profile active at time_ms."""
+        profile = self.get_at_ms(time_ms)
+        cr_schedule = profile.get("carbratio", [])
+        if not cr_schedule:
+            return 10.0
+        return _time_weighted_average(cr_schedule, value_key="value")
+
+    def basal_schedule_at(self, dt: datetime) -> List[dict]:
+        """Return the basal schedule from the profile active at dt."""
+        profile = self.get_at(dt)
+        return profile.get("basal", [])
+
+    def average_settings(self, start: datetime, end: datetime) -> dict:
+        """Compute time-weighted average ISF, CR, basal across the date range.
+
+        Handles profiles changing mid-range by weighting each profile's contribution
+        by the duration it was active within [start, end].
+        """
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+        if end.tzinfo is None:
+            end = end.replace(tzinfo=timezone.utc)
+
+        # Build segments: [(seg_start, seg_end, profile), ...]
+        segments = []
+        # Find entries relevant to the range
+        active_profile = self._fallback
+        for entry_dt, entry in self._entries:
+            if entry_dt <= start:
+                active_profile = entry
+
+        seg_start = start
+        for entry_dt, entry in self._entries:
+            if entry_dt <= start:
+                continue
+            if entry_dt >= end:
+                break
+            segments.append((seg_start, entry_dt, active_profile))
+            active_profile = entry
+            seg_start = entry_dt
+        segments.append((seg_start, end, active_profile))
+
+        total_seconds = (end - start).total_seconds()
+        if total_seconds <= 0:
+            profile = self.get_at(start)
+            return {
+                "isf": _time_weighted_average(profile.get("sens", [{"value": 100}]), "value"),
+                "cr": _time_weighted_average(profile.get("carbratio", [{"value": 10}]), "value"),
+                "basal": _time_weighted_average(profile.get("basal", [{"value": 1}]), "value"),
+            }
+
+        weighted_isf = 0.0
+        weighted_cr = 0.0
+        weighted_basal = 0.0
+        for seg_start, seg_end, profile in segments:
+            weight = (seg_end - seg_start).total_seconds() / total_seconds
+            isf_sched = profile.get("sens", [{"value": 100}])
+            cr_sched = profile.get("carbratio", [{"value": 10}])
+            basal_sched = profile.get("basal", [{"value": 1}])
+            weighted_isf += weight * _time_weighted_average(isf_sched, "value")
+            weighted_cr += weight * _time_weighted_average(cr_sched, "value")
+            weighted_basal += weight * _time_weighted_average(basal_sched, "value")
+
+        return {
+            "isf": round(weighted_isf, 1),
+            "cr": round(weighted_cr, 1),
+            "basal": round(weighted_basal, 3),
+        }
+
+    def summary(self, start: datetime, end: datetime) -> str:
+        """Return a human-readable summary of profile changes in the date range."""
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+        if end.tzinfo is None:
+            end = end.replace(tzinfo=timezone.utc)
+
+        changes = []
+        for entry_dt, entry in self._entries:
+            if entry_dt < start or entry_dt > end:
+                continue
+            isf = _time_weighted_average(entry.get("sens", [{"value": "?"}]), "value")
+            cr = _time_weighted_average(entry.get("carbratio", [{"value": "?"}]), "value")
+            basal = _time_weighted_average(entry.get("basal", [{"value": "?"}]), "value")
+            changes.append(f"    {entry_dt.strftime('%Y-%m-%d %H:%M')} ISF={isf:.0f} CR={cr:.1f} Basal={basal:.3f}")
+        return f"  {len(changes)} profile changes in range" + ("\n" + "\n".join(changes) if changes else "")
 
 
 # ─── Step 2: Meal Patterns from Carb Treatments ──────────────────────────────
@@ -509,17 +649,36 @@ def build_profile(
     print(f"Querying {url}")
     print(f"Date range: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
 
-    # --- Fetch NS profile ---
-    print("\nFetching Nightscout profile...")
-    ns_profile = fetch_profile(url, token=token)
+    # --- Fetch NS profile history ---
+    print("\nFetching Nightscout profile history...")
+    ns_profile = fetch_profile(url, token=token)  # current profile (for timezone, etc.)
+    profile_history = fetch_profile_history(url, token=token)
+    print(f"  {len(profile_history)} distinct profile entries in history")
+
+    # Build timeline for per-day settings lookup
+    profile_timeline = ProfileTimeline(profile_history, fallback_profile=ns_profile)
 
     # Determine timezone
     tz_str = ns_profile.get("timezone", "America/New_York")
     tz = ZoneInfo(tz_str)
     print(f"  Timezone: {tz_str}")
 
-    # --- Step 1: Algorithm settings ---
-    algo_settings = extract_algorithm_settings(ns_profile)
+    # Show profile changes in the date range
+    print(profile_timeline.summary(start_date, end_date))
+
+    # --- Step 1: Algorithm settings (time-weighted average for the date range) ---
+    avg_settings = profile_timeline.average_settings(start_date, end_date)
+    # Also extract full schedule from the midpoint profile for display
+    midpoint = start_date + (end_date - start_date) / 2
+    midpoint_profile = profile_timeline.get_at(midpoint)
+    algo_settings = extract_algorithm_settings(midpoint_profile)
+    # Override with the time-weighted averages across the full range
+    algo_settings["insulin_sensitivity_factor"] = avg_settings["isf"]
+    algo_settings["carb_ratio"] = avg_settings["cr"]
+    algo_settings["basal_rate"] = avg_settings["basal"]
+    print(f"\n  Time-weighted averages across date range:")
+    print(f"    ISF: {avg_settings['isf']:.1f}, CR: {avg_settings['cr']:.1f}, "
+          f"Basal: {avg_settings['basal']:.3f}")
 
     # Merge with defaults from settings.json
     settings_path = Path(__file__).parent / "settings.json"
@@ -554,8 +713,11 @@ def build_profile(
 
     # --- Step 6: Insulin timeline (built but not included in profile) ---
     print("\nReconstructing insulin timeline...")
-    basal_schedule = ns_profile.get("basal", [])
-    insulin_timeline = reconstruct_insulin_timeline(all_treatments, basal_schedule, tz)
+    # Use midpoint profile's basal schedule for gap-filling
+    basal_schedule = midpoint_profile.get("basal", [])
+    insulin_timeline = reconstruct_insulin_timeline(
+        all_treatments, basal_schedule, tz, profile_timeline=profile_timeline
+    )
     print(f"  Built {len(insulin_timeline)} insulin events")
 
     # Count by type
@@ -592,18 +754,20 @@ def build_profile(
             carb_times_ms.append(int(dt.timestamp() * 1000))
             carb_treatment_entries.append(t)
 
-        # Step L2.1: Compute deviations
+        # Step L2.1: Compute deviations (uses per-point ISF from profile timeline)
         devs = compute_deviations(
-            cgm_entries, insulin_timeline, merged_settings, basal_schedule, tz
+            cgm_entries, insulin_timeline, merged_settings, basal_schedule, tz,
+            profile_timeline=profile_timeline,
         )
 
         if devs:
             # Step L2.2: Sensitivity sigma
             l2_sensitivity_sigma = estimate_sensitivity_sigma(devs, carb_times_ms, tz)
 
-            # Step L2.3: Carb counting error
+            # Step L2.3: Carb counting error (uses per-day ISF/CR from profile timeline)
             l2_carb_count_sigma, l2_carb_count_bias = estimate_carb_counting_error(
-                devs, carb_treatment_entries, carb_times_ms, merged_settings
+                devs, carb_treatment_entries, carb_times_ms, merged_settings,
+                profile_timeline=profile_timeline,
             )
 
             # Step L2.4: Undeclared meals — skipped (too noisy; picks up
@@ -693,11 +857,14 @@ def reconstruct_insulin_timeline(
     treatments: List[dict],
     basal_schedule: List[dict],
     tz: ZoneInfo,
+    profile_timeline: Optional['ProfileTimeline'] = None,
 ) -> List[InsulinEvent]:
     """Reconstruct unified insulin timeline from NS treatments.
 
     Combines temp basals, boluses, and SMBs into a sorted timeline.
     Fills gaps between temp basals with scheduled basal from the profile.
+    If profile_timeline is provided, uses the historically active basal schedule
+    for each gap instead of the single basal_schedule.
     """
     events = []
 
@@ -742,17 +909,25 @@ def reconstruct_insulin_timeline(
         ))
 
     # --- Fill gaps with scheduled basal ---
-    if temp_basals and basal_schedule:
-        sorted_schedule = sorted(basal_schedule, key=lambda e: e["timeAsSeconds"])
+    if temp_basals and (basal_schedule or profile_timeline):
+        fallback_schedule = sorted(basal_schedule, key=lambda e: e["timeAsSeconds"]) if basal_schedule else []
         for i in range(len(temp_basals) - 1):
             gap_start = temp_basals[i]["time"] + temp_basals[i]["duration_min"] * 60
             gap_end = temp_basals[i + 1]["time"]
             gap_duration_min = (gap_end - gap_start) / 60.0
 
             if gap_duration_min > 1.0:  # Only fill gaps > 1 minute
-                # Find scheduled rate at gap_start
                 gap_dt = datetime.fromtimestamp(gap_start, tz=timezone.utc).astimezone(tz)
                 seconds_from_midnight = gap_dt.hour * 3600 + gap_dt.minute * 60 + gap_dt.second
+
+                # Use historically active basal schedule if available
+                if profile_timeline:
+                    gap_dt_utc = datetime.fromtimestamp(gap_start, tz=timezone.utc)
+                    active_basal = profile_timeline.basal_schedule_at(gap_dt_utc)
+                    sorted_schedule = sorted(active_basal, key=lambda e: e["timeAsSeconds"]) if active_basal else fallback_schedule
+                else:
+                    sorted_schedule = fallback_schedule
+
                 scheduled_rate = _get_scheduled_rate(sorted_schedule, seconds_from_midnight)
 
                 units = scheduled_rate * gap_duration_min / 60.0
@@ -858,10 +1033,13 @@ def compute_deviations(
     profile_settings: dict,
     basal_schedule: List[dict],
     tz: ZoneInfo,
+    profile_timeline: Optional['ProfileTimeline'] = None,
 ) -> List[dict]:
     """Compute BG deviations at each 5-min CGM point.
 
     At each point: deviation = observed_delta - BGI (insulin-predicted delta).
+    If profile_timeline is provided, uses per-point ISF from the historically
+    active profile. Otherwise uses the single ISF from profile_settings.
 
     Returns list of dicts: [{time_ms, local_hour, sgv, delta, bgi, deviation}, ...]
     """
@@ -887,7 +1065,13 @@ def compute_deviations(
 
     # Build Trio-compatible profile
     trio_profile = _build_trio_profile(profile_settings, basal_schedule)
-    isf = profile_settings.get("insulin_sensitivity_factor", 100.0)
+    fallback_isf = profile_settings.get("insulin_sensitivity_factor", 100.0)
+    use_timeline_isf = profile_timeline is not None
+
+    if use_timeline_isf:
+        print(f"  Using per-point ISF from profile history")
+    else:
+        print(f"  Using fixed ISF: {fallback_isf}")
 
     # Pre-compute treatments once (find_insulin is expensive to call per-point)
     # We'll call iob_total at each CGM time using the full treatment list
@@ -917,6 +1101,9 @@ def compute_deviations(
         # Get insulin activity at this point
         iob_result = iob_total(treatments, curr["date_ms"], trio_profile)
         activity = iob_result.get("activity", 0)
+
+        # ISF: use the historically active profile's ISF at this timestamp
+        isf = profile_timeline.isf_at_ms(curr["date_ms"]) if use_timeline_isf else fallback_isf
 
         # BGI = expected BG change from insulin (activity is U/min)
         bgi = -activity * isf * 5.0
@@ -1038,6 +1225,7 @@ def estimate_carb_counting_error(
     carb_entries: List[dict],
     carb_times_ms: List[int],
     profile_settings: dict,
+    profile_timeline: Optional['ProfileTimeline'] = None,
 ) -> Tuple[float, float]:
     """Estimate carb counting sigma and bias using daily totals.
 
@@ -1046,30 +1234,48 @@ def estimate_carb_counting_error(
     compare daily total declared carbs to daily total implied carbs (from
     baseline-adjusted positive deviations), which avoids double-counting.
 
+    If profile_timeline is provided, uses per-day ISF/CR from the historically
+    active profile. Otherwise uses the single values from profile_settings.
+
     Returns (sigma, bias) for lognormal carb counting error model.
     """
     print(f"\n{'='*70}")
     print("Layer 2, Step 3: Carb Counting Error")
     print(f"{'='*70}")
 
-    isf = profile_settings.get("insulin_sensitivity_factor", 100.0)
-    cr = profile_settings.get("carb_ratio", 10.0)
-    csf = isf / cr  # mg/dL per gram of carbs
+    fallback_isf = profile_settings.get("insulin_sensitivity_factor", 100.0)
+    fallback_cr = profile_settings.get("carb_ratio", 10.0)
+    use_timeline = profile_timeline is not None
+
+    if use_timeline:
+        print(f"  Using per-day ISF/CR from profile history")
+    else:
+        isf = fallback_isf
+        cr = fallback_cr
+        print(f"  Using fixed ISF={isf}, CR={cr}, CSF={isf/cr:.1f}")
 
     MEAL_EXCLUDE_MS = 3 * 3600 * 1000
 
-    # Compute baseline: median non-meal deviation
-    non_meal_devs = []
+    # Compute baseline: median of 1am-6am non-meal deviations (cleanest window)
+    night_non_meal_devs = []
+    all_non_meal_devs = []
     for d in deviations:
         near_carb = any(
             0 <= (d["time_ms"] - ct) <= MEAL_EXCLUDE_MS
             for ct in carb_times_ms
         )
         if not near_carb:
-            non_meal_devs.append(d["deviation"])
+            all_non_meal_devs.append(d["deviation"])
+            if 1 <= d["local_hour"] < 6:
+                night_non_meal_devs.append(d["deviation"])
 
-    baseline = float(np.median(non_meal_devs)) if non_meal_devs else 0.0
-    print(f"  Baseline deviation (non-meal median): {baseline:.2f} mg/dL/5min")
+    if night_non_meal_devs:
+        baseline = float(np.median(night_non_meal_devs))
+        print(f"  Baseline deviation (1am-6am non-meal median): {baseline:.2f} mg/dL/5min "
+              f"({len(night_non_meal_devs)} points)")
+    else:
+        baseline = float(np.median(all_non_meal_devs)) if all_non_meal_devs else 0.0
+        print(f"  Baseline deviation (all non-meal median, no overnight data): {baseline:.2f} mg/dL/5min")
 
     # Group declared carbs by day
     daily_declared = defaultdict(float)
@@ -1098,8 +1304,8 @@ def estimate_carb_counting_error(
 
     # Compute daily ratios (implied/declared)
     log_ratios = []
-    print(f"\n  {'Day':<12} {'Declared':>10} {'Implied':>10} {'Ratio':>8}")
-    print(f"  {'-'*42}")
+    print(f"\n  {'Day':<12} {'Declared':>10} {'Implied':>10} {'CSF':>6} {'Ratio':>8}")
+    print(f"  {'-'*50}")
     for day in sorted(daily_declared.keys()):
         declared = daily_declared[day]
         if declared < 10:  # Skip days with very few declared carbs
@@ -1107,13 +1313,22 @@ def estimate_carb_counting_error(
         if daily_dev_count.get(day, 0) < 100:  # Need ~8h of CGM data
             continue
 
+        # Get per-day CSF from profile timeline
+        if use_timeline:
+            # Use noon of that day as representative timestamp
+            day_dt = datetime.fromisoformat(day + "T12:00:00+00:00")
+            day_ms = int(day_dt.timestamp() * 1000)
+            isf = profile_timeline.isf_at_ms(day_ms)
+            cr = profile_timeline.cr_at_ms(day_ms)
+        csf = isf / cr
+
         implied = daily_pos_dev_sum.get(day, 0) / csf
         if implied < 1:
             continue
 
         ratio = implied / declared
         log_ratios.append(math.log(ratio))
-        print(f"  {day}   {declared:>8.0f}g   {implied:>8.0f}g   {ratio:>7.2f}x")
+        print(f"  {day}   {declared:>8.0f}g   {implied:>8.0f}g  {csf:>5.1f}  {ratio:>7.2f}x")
 
     print(f"\n  Analyzable days: {len(log_ratios)}")
 
