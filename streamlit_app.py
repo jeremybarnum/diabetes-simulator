@@ -951,7 +951,7 @@ with tab_ns:
 
     ns_url = st.text_input("Nightscout URL", key="ns_url_in",
                            placeholder="https://your-ns-site.nightscoutpro.com")
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
         ns_token = st.text_input("API Token (optional)", key="ns_token_in", type="password")
         ns_profile_name = st.text_input("Save as profile name", value="ns_inferred", key="ns_name_in")
@@ -967,6 +967,15 @@ with tab_ns:
             ns_end_date = st.date_input("End date", value=today, key="ns_end_date")
             ns_start_date = st.date_input("Start date", value=today - timedelta(days=28), key="ns_start_date")
             ns_days = 28  # fallback, overridden by dates
+    with col3:
+        from nightscout_profile import INSULIN_TYPES, DEFAULT_INSULIN_TYPE
+        insulin_options = list(INSULIN_TYPES.keys())
+        ns_insulin_type = st.selectbox(
+            "Insulin type", options=insulin_options,
+            index=insulin_options.index(DEFAULT_INSULIN_TYPE),
+            key="ns_insulin_type",
+            help="Determines the insulin activity curve used for deviation analysis"
+        )
 
     import_button = st.button("Import from Nightscout", type="primary")
 
@@ -994,6 +1003,7 @@ with tab_ns:
                         profile_dict = ns_build_profile(
                             url, days=ns_days, token=token, output_path=save_path,
                             start_date=_start, end_date=_end,
+                            insulin_type=ns_insulin_type,
                         )
                 except Exception as e:
                     st.error(f"Import failed: {e}")

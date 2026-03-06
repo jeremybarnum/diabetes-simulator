@@ -35,6 +35,21 @@ from nightscout_query import (
 from algorithms.openaps.iob import iob_total, find_insulin
 
 
+# ─── Insulin Type Mapping ─────────────────────────────────────────────────────
+
+# Insulin type → curve mapping for the exponential IOB model.
+# The curve name determines peak activity time:
+#   rapid-acting (peak=75min): Novolog, Humalog, and similar
+#   ultra-rapid  (peak=55min): Fiasp, Lyumjev
+INSULIN_TYPES = {
+    "novolog":  "rapid-acting",
+    "humalog":  "rapid-acting",
+    "fiasp":    "ultra-rapid",
+    "lyumjev":  "ultra-rapid",
+}
+DEFAULT_INSULIN_TYPE = "novolog"
+
+
 # ─── Data Classes ─────────────────────────────────────────────────────────────
 
 @dataclass
@@ -623,11 +638,13 @@ def build_profile(
     layer2: bool = True,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
+    insulin_type: str = DEFAULT_INSULIN_TYPE,
 ) -> dict:
     """Full pipeline: fetch NS data → extract patterns → build PatientProfile dict.
 
     Date range: if start_date/end_date are provided, they take precedence over days.
     If only one is provided, the other is inferred from days.
+    insulin_type: one of INSULIN_TYPES keys (novolog, humalog, fiasp, lyumjev).
     """
 
     if start_date and end_date:
@@ -646,8 +663,12 @@ def build_profile(
     if end_date.tzinfo is None:
         end_date = end_date.replace(tzinfo=timezone.utc)
 
+    # Resolve insulin type to curve
+    insulin_curve = INSULIN_TYPES.get(insulin_type.lower(), "rapid-acting")
+
     print(f"Querying {url}")
     print(f"Date range: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+    print(f"Insulin type: {insulin_type} (curve: {insulin_curve})")
 
     # --- Fetch NS profile history ---
     print("\nFetching Nightscout profile history...")
@@ -758,6 +779,7 @@ def build_profile(
         devs = compute_deviations(
             cgm_entries, insulin_timeline, merged_settings, basal_schedule, tz,
             profile_timeline=profile_timeline,
+            insulin_curve=insulin_curve,
         )
 
         if devs:
@@ -1006,7 +1028,11 @@ def _insulin_timeline_to_pump_history(insulin_timeline: List[InsulinEvent]) -> L
     return history
 
 
-def _build_trio_profile(profile_settings: dict, basal_schedule: List[dict]) -> dict:
+def _build_trio_profile(
+    profile_settings: dict,
+    basal_schedule: List[dict],
+    insulin_curve: str = "rapid-acting",
+) -> dict:
     """Build a minimal Trio-compatible profile dict for iob_total()."""
     dia = profile_settings.get("duration_of_insulin_action", 6.0)
     current_basal = profile_settings.get("basal_rate", 1.0)
@@ -1021,7 +1047,7 @@ def _build_trio_profile(profile_settings: dict, basal_schedule: List[dict]) -> d
 
     return {
         "dia": dia,
-        "curve": "rapid-acting",
+        "curve": insulin_curve,
         "current_basal": current_basal,
         "basalprofile": basalprofile,
     }
@@ -1034,6 +1060,7 @@ def compute_deviations(
     basal_schedule: List[dict],
     tz: ZoneInfo,
     profile_timeline: Optional['ProfileTimeline'] = None,
+    insulin_curve: str = "rapid-acting",
 ) -> List[dict]:
     """Compute BG deviations at each 5-min CGM point.
 
@@ -1064,7 +1091,7 @@ def compute_deviations(
     pump_history = _insulin_timeline_to_pump_history(insulin_timeline)
 
     # Build Trio-compatible profile
-    trio_profile = _build_trio_profile(profile_settings, basal_schedule)
+    trio_profile = _build_trio_profile(profile_settings, basal_schedule, insulin_curve)
     fallback_isf = profile_settings.get("insulin_sensitivity_factor", 100.0)
     use_timeline_isf = profile_timeline is not None
 
@@ -1500,6 +1527,9 @@ def main():
                         help="Output path (default patient_profiles/ns_inferred.json)")
     parser.add_argument("--no-layer2", action="store_true",
                         help="Skip Layer 2 deviation analysis (use defaults)")
+    parser.add_argument("--insulin-type", type=str, default=DEFAULT_INSULIN_TYPE,
+                        choices=list(INSULIN_TYPES.keys()),
+                        help=f"Insulin type for activity curve (default {DEFAULT_INSULIN_TYPE})")
     args = parser.parse_args()
 
     start_dt = None
@@ -1517,6 +1547,7 @@ def main():
         layer2=not args.no_layer2,
         start_date=start_dt,
         end_date=end_dt,
+        insulin_type=args.insulin_type,
     )
 
 
