@@ -371,6 +371,13 @@ selected_ns_ref = st.sidebar.selectbox(
     help="Overlay the real Nightscout median BG trace on the spaghetti plot for comparison.",
 )
 ns_ref_path = ns_ref_names[selected_ns_ref]
+ns_ref_trace_type = st.sidebar.radio(
+    "Reference trace",
+    ["All days", "Rest days", "Exercise days"],
+    index=0,
+    horizontal=True,
+    help="Which subset of days to show in the NS overlay.",
+) if ns_ref_path else "All days"
 
 run_button = st.sidebar.button("Run Simulation", type="primary", use_container_width=True)
 
@@ -455,7 +462,8 @@ def run_paths_cloud(variants, n_paths, n_days, seed, progress_cb=None):
     return traces_by_variant, metrics_by_variant
 
 
-def plot_spaghetti(traces_by_algo, algo_colors, n_paths, n_days, ns_ref_trace=None):
+def plot_spaghetti(traces_by_algo, algo_colors, n_paths, n_days,
+                   ns_ref_trace=None, ns_ref_label="NS Reference"):
     """Create spaghetti plot. Each day of each path overlaid on 0-24h axis.
 
     ns_ref_trace: optional list of (hour_from_7am, median_bg) from NS data.
@@ -467,7 +475,7 @@ def plot_spaghetti(traces_by_algo, algo_colors, n_paths, n_days, ns_ref_trace=No
         ref_hours = [h for h, _ in ns_ref_trace]
         ref_bgs = [bg for _, bg in ns_ref_trace]
         ax.plot(ref_hours, ref_bgs, color="black", linewidth=2.5, linestyle="--",
-                alpha=0.7, label="NS Reference (median)", zorder=5)
+                alpha=0.7, label=f"{ns_ref_label} (median)", zorder=5)
 
     for algo_name, all_day_traces in traces_by_algo.items():
         color = algo_colors[algo_name]
@@ -1294,15 +1302,22 @@ with tab_results:
                 try:
                     with open(ns_ref_path) as _f:
                         _ns_ref_data = json.load(_f)
-                    _ns_ref_trace = [tuple(p) for p in _ns_ref_data.get("median_trace", [])]
+                    _trace_key = {
+                        "All days": "median_trace",
+                        "Rest days": "median_trace_rest",
+                        "Exercise days": "median_trace_exercise",
+                    }.get(ns_ref_trace_type, "median_trace")
+                    _raw_trace = _ns_ref_data.get(_trace_key) or _ns_ref_data.get("median_trace", [])
+                    _ns_ref_trace = [tuple(p) for p in _raw_trace]
                     _ns_ref_stats = _ns_ref_data
                 except Exception:
                     pass
 
             # Spaghetti plot
             st.subheader("BG Traces")
+            _ref_label = f"NS {ns_ref_trace_type}" if ns_ref_path else "NS Reference"
             fig = plot_spaghetti(traces_by_variant, variant_colors, n_paths, n_days,
-                                 ns_ref_trace=_ns_ref_trace)
+                                 ns_ref_trace=_ns_ref_trace, ns_ref_label=_ref_label)
             st.pyplot(fig)
             plt.close(fig)
 

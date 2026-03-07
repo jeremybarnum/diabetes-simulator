@@ -733,6 +733,82 @@ def extract_bg_stats(entries: List[dict], tz: ZoneInfo) -> dict:
     }
 
 
+# ─── Exercise Day Classification ─────────────────────────────────────────────
+
+def _classify_exercise_days(treatments: List[dict], tz: ZoneInfo) -> set:
+    """Identify dates with exercise from temporary overrides and exercise events.
+
+    Exercise overrides: daytime (8-18h), insulin needs < 1.0, excluding
+    defensive overrides ("crashy", "refuse") and high-resistance ("horse show").
+    """
+    exercise_dates = set()
+
+    for t in treatments:
+        if t.get("eventType") == "Temporary Override":
+            created = t.get("created_at", "")
+            if not created:
+                continue
+            try:
+                dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+            except (ValueError, AttributeError):
+                continue
+            local = dt.astimezone(tz)
+            reason = (t.get("reason", "") or "").lower()
+            duration = t.get("duration", 0)
+            insulin_needs = t.get("insulinNeedsScaleFactor")
+
+            is_exercise = False
+            if insulin_needs is not None and insulin_needs < 1.0 and 8 <= local.hour <= 18:
+                is_exercise = True
+            if any(kw in reason for kw in ["riding", "workout", "cardio", "exercise", "70%"]):
+                is_exercise = True
+            if "crashy" in reason or "refuse" in reason:
+                is_exercise = False
+            if insulin_needs is not None and insulin_needs > 1.2:
+                is_exercise = False
+
+            if is_exercise and duration > 0:
+                exercise_dates.add(local.date().isoformat())
+
+        elif t.get("eventType") == "Exercise":
+            created = t.get("created_at", "")
+            if not created:
+                continue
+            try:
+                dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+            except (ValueError, AttributeError):
+                continue
+            local = dt.astimezone(tz)
+            notes = (t.get("notes", "") or "").lower()
+            if any(kw in notes for kw in ["cardio", "workout", "riding"]):
+                exercise_dates.add(local.date().isoformat())
+
+    return exercise_dates
+
+
+def _split_entries_by_exercise(
+    cgm_entries: List[dict],
+    exercise_dates: set,
+    utc_offset_hours: float = -5.0,
+) -> Tuple[List[dict], List[dict]]:
+    """Split CGM entries into exercise-day and rest-day lists."""
+    tz_offset = timedelta(hours=utc_offset_hours)
+    exercise_entries = []
+    rest_entries = []
+    for e in cgm_entries:
+        date_ms = e.get("date")
+        if not date_ms:
+            continue
+        dt_utc = datetime.fromtimestamp(date_ms / 1000, tz=timezone.utc)
+        local = dt_utc + tz_offset
+        day = local.strftime("%Y-%m-%d")
+        if day in exercise_dates:
+            exercise_entries.append(e)
+        else:
+            rest_entries.append(e)
+    return exercise_entries, rest_entries
+
+
 # ─── Step 5: Assemble Profile ────────────────────────────────────────────────
 
 def build_profile(
@@ -850,13 +926,24 @@ def build_profile(
     # --- Step 4: BG stats ---
     bg_stats = extract_bg_stats(cgm_entries, tz)
 
-    # --- Median daily trace (for visual comparison) ---
+    # --- Median daily traces (all / exercise / rest) ---
     try:
         tz_offset_hours = tz.utcoffset(start_date.replace(tzinfo=None)).total_seconds() / 3600
     except Exception:
         tz_offset_hours = -5.0
+
+    exercise_dates = _classify_exercise_days(all_treatments, tz)
+    exercise_entries, rest_entries = _split_entries_by_exercise(
+        cgm_entries, exercise_dates, tz_offset_hours
+    )
+
     median_trace = compute_median_daily_trace(cgm_entries, utc_offset_hours=tz_offset_hours)
-    print(f"  Median daily trace: {len(median_trace)} points")
+    median_trace_exercise = compute_median_daily_trace(exercise_entries, utc_offset_hours=tz_offset_hours) if exercise_entries else []
+    median_trace_rest = compute_median_daily_trace(rest_entries, utc_offset_hours=tz_offset_hours) if rest_entries else []
+
+    print(f"  Median daily traces: all={len(median_trace)}, "
+          f"exercise={len(median_trace_exercise)} ({len(exercise_dates)} days), "
+          f"rest={len(median_trace_rest)} pts")
 
     # --- Step 6: Insulin timeline (built but not included in profile) ---
     print("\nReconstructing insulin timeline...")
@@ -954,7 +1041,10 @@ def build_profile(
             "time_above_180": bg_stats["time_above_180"],
             "time_above_250": bg_stats["time_above_250"],
             "gmi": round(3.31 + 0.02392 * bg_stats["mean_bg"], 1),
-            "median_trace": median_trace,  # [(hour_from_7am, median_bg), ...]
+            "median_trace": median_trace,
+            "median_trace_exercise": median_trace_exercise,
+            "median_trace_rest": median_trace_rest,
+            "exercise_days": len(exercise_dates),
         },
     }
 
