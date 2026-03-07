@@ -696,7 +696,16 @@ class SimulationRun:
 
                 # Draw actual carbs (normal distribution, clamp > 0)
                 actual_g = max(2.0, self.rng.normal(spec.carbs_mean, spec.carbs_sd))
-                actual_abs = spec.absorption_hrs
+
+                # Actual absorption is stochastic (real physiology varies day to day)
+                if abs_sigma > 0:
+                    actual_abs = spec.absorption_hrs * float(np.exp(
+                        self.rng.normal(0, abs_sigma)))
+                else:
+                    actual_abs = spec.absorption_hrs
+
+                # Declared absorption is deterministic (patient always declares the same)
+                declared_abs = spec.absorption_hrs
 
                 # Determine if undeclared: spec.declared=False, or random undeclared
                 is_undeclared = not spec.declared
@@ -709,7 +718,7 @@ class SimulationRun:
                         actual_carbs=actual_g,
                         actual_absorption_hrs=actual_abs,
                         declared_carbs=0.0,
-                        declared_absorption_hrs=actual_abs,
+                        declared_absorption_hrs=declared_abs,
                         undeclared=True,
                     ))
                 else:
@@ -724,14 +733,6 @@ class SimulationRun:
                         declared_g = actual_g * count_error
                     else:
                         declared_g = actual_g
-
-                    # Patient estimates absorption with error
-                    if abs_sigma > 0:
-                        abs_error = float(np.exp(
-                            self.rng.normal(0, abs_sigma)))
-                        declared_abs = actual_abs * abs_error
-                    else:
-                        declared_abs = actual_abs
 
                     meals.append(MealEvent(
                         time_minutes=meal_time,

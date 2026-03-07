@@ -595,28 +595,32 @@ with tab_patient:
                "Undeclared meals are eaten but never bolused for. "
                "**Count Error σ** overrides the global carb counting sigma for that meal (blank = use global).")
 
-    edited_meals = st.data_editor(
-        st.session_state["meals_df"],
-        num_rows="dynamic",
-        use_container_width=True,
-        key="meals_editor",
-        column_config={
-            "Time": st.column_config.TextColumn(
-                "Time (HH:MM)", help="24h clock time"),
-            "Avg Carbs (g)": st.column_config.NumberColumn(
-                "Avg Carbs (g)", min_value=0, max_value=200, step=1),
-            "SD (g)": st.column_config.NumberColumn(
-                "SD (g)", min_value=0, max_value=50, step=1),
-            "Absorption (hrs)": st.column_config.NumberColumn(
-                "Absorption (hrs)", min_value=0.5, max_value=8.0, step=0.5),
-            "Declared": st.column_config.CheckboxColumn(
-                "Declared", help="If unchecked, meal is eaten but never entered into the pump", default=True),
-            "Count Error σ": st.column_config.NumberColumn(
-                "Count Error σ", min_value=0.0, max_value=1.0, step=0.05, default=0.15,
-                help="Per-meal carb counting error sigma."),
-        },
-    )
-    st.session_state["meals_df"] = edited_meals.sort_values("Time").reset_index(drop=True)
+    @st.fragment
+    def meal_editor_fragment():
+        edited_meals = st.data_editor(
+            st.session_state["meals_df"],
+            num_rows="dynamic",
+            use_container_width=True,
+            key="meals_editor",
+            column_config={
+                "Time": st.column_config.TextColumn(
+                    "Time (HH:MM)", help="24h clock time"),
+                "Avg Carbs (g)": st.column_config.NumberColumn(
+                    "Avg Carbs (g)", min_value=0, max_value=200, step=1),
+                "SD (g)": st.column_config.NumberColumn(
+                    "SD (g)", min_value=0, max_value=50, step=1),
+                "Absorption (hrs)": st.column_config.NumberColumn(
+                    "Absorption (hrs)", min_value=0.5, max_value=8.0, step=0.5),
+                "Declared": st.column_config.CheckboxColumn(
+                    "Declared", help="If unchecked, meal is eaten but never entered into the pump", default=True),
+                "Count Error σ": st.column_config.NumberColumn(
+                    "Count Error σ", min_value=0.0, max_value=1.0, step=0.05, default=0.15,
+                    help="Per-meal carb counting error sigma."),
+            },
+        )
+        st.session_state["meals_df"] = edited_meals.sort_values("Time").reset_index(drop=True)
+
+    meal_editor_fragment()
 
     st.divider()
 
@@ -630,9 +634,10 @@ with tab_patient:
             key="carb_count_sigma_sl",
         )
         st.slider(
-            "Absorption estimate error (sigma)",
+            "Actual absorption variation (sigma)",
             min_value=0.0, max_value=1.0, step=0.05,
-            help="Lognormal sigma for absorption time estimation error",
+            help="Lognormal sigma for day-to-day variation in actual carb absorption speed. "
+                 "Declared absorption time stays fixed; actual varies around it.",
             key="absorption_sigma_sl",
         )
     with col2:
