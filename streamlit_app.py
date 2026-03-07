@@ -98,6 +98,17 @@ def save_profile_to_json(file_path: str):
             "actual_duration_hrs_mean": ex.actual_duration_hrs_mean,
             "actual_duration_hrs_sigma": ex.actual_duration_hrs_sigma,
         }
+    if profile.algorithm_settings:
+        data["algorithm_settings"] = profile.algorithm_settings
+    # Preserve ns_reference_stats if present in the existing file
+    if Path(file_path).exists():
+        try:
+            with open(file_path) as f:
+                existing = json.load(f)
+            if "ns_reference_stats" in existing:
+                data["ns_reference_stats"] = existing["ns_reference_stats"]
+        except (json.JSONDecodeError, IOError):
+            pass
     with open(file_path, 'w') as f:
         json.dump(data, f, indent=4)
 
@@ -919,6 +930,16 @@ with tab_algo:
             help="Controls the aggressiveness of sigmoid dynamic ISF. "
                  "Lower = gentler adjustments, higher = more aggressive.",
         )
+
+    st.divider()
+    if st.button("Save Settings to Profile", key="save_therapy_btn", use_container_width=True):
+        loaded = st.session_state.get("loaded_profile")
+        if loaded:
+            save_profile_to_json(loaded)
+            profile_name = Path(loaded).stem.replace("_", " ").title()
+            st.success(f"Saved to **{profile_name}**.")
+        else:
+            st.warning("No profile loaded — save from the Patient Model tab first.")
 
 
 # ─── Tab 4: Import from Nightscout ───────────────────────────────────────────
