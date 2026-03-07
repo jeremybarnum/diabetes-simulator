@@ -40,6 +40,12 @@ profile_dir = Path(__file__).parent / "patient_profiles"
 profile_files = sorted(profile_dir.glob("*.json"))
 profile_names = {p.stem.replace("_", " ").title(): str(p) for p in profile_files}
 
+ns_ref_dir = Path(__file__).parent / "ns_references"
+ns_ref_dir.mkdir(exist_ok=True)
+ns_ref_files = sorted(ns_ref_dir.glob("*.json"))
+ns_ref_names = {"(none)": None}
+ns_ref_names.update({p.stem.replace("_", " ").title(): str(p) for p in ns_ref_files})
+
 
 def _minutes_to_clock(minutes_from_7am: int) -> str:
     """Convert minutes from 7am to clock time string."""
@@ -358,6 +364,14 @@ seed = st.sidebar.number_input(
     help="Fixed seed makes results reproducible. Change it to see different random draws.",
 )
 
+selected_ns_ref = st.sidebar.selectbox(
+    "NS Reference Overlay",
+    list(ns_ref_names.keys()),
+    index=0,
+    help="Overlay the real Nightscout median BG trace on the spaghetti plot for comparison.",
+)
+ns_ref_path = ns_ref_names[selected_ns_ref]
+
 run_button = st.sidebar.button("Run Simulation", type="primary", use_container_width=True)
 
 
@@ -441,9 +455,19 @@ def run_paths_cloud(variants, n_paths, n_days, seed, progress_cb=None):
     return traces_by_variant, metrics_by_variant
 
 
-def plot_spaghetti(traces_by_algo, algo_colors, n_paths, n_days):
-    """Create spaghetti plot. Each day of each path overlaid on 0-24h axis."""
+def plot_spaghetti(traces_by_algo, algo_colors, n_paths, n_days, ns_ref_trace=None):
+    """Create spaghetti plot. Each day of each path overlaid on 0-24h axis.
+
+    ns_ref_trace: optional list of (hour_from_7am, median_bg) from NS data.
+    """
     fig, ax = plt.subplots(figsize=(14, 7))
+
+    # NS reference trace (behind everything)
+    if ns_ref_trace:
+        ref_hours = [h for h, _ in ns_ref_trace]
+        ref_bgs = [bg for _, bg in ns_ref_trace]
+        ax.plot(ref_hours, ref_bgs, color="black", linewidth=2.5, linestyle="--",
+                alpha=0.7, label="NS Reference (median)", zorder=5)
 
     for algo_name, all_day_traces in traces_by_algo.items():
         color = algo_colors[algo_name]
@@ -1079,6 +1103,13 @@ with tab_ns:
 
             st.success(f"Profile saved to **{filename}.json**")
 
+            # Save standalone NS reference
+            from nightscout_profile import save_ns_reference
+            ref_path = str(ns_ref_dir / f"{filename}.json")
+            save_ns_reference(profile_dict, ref_path)
+            st.info(f"NS reference trace saved to **ns_references/{filename}.json** — "
+                    f"select it from the sidebar to overlay on simulation results.")
+
             # Algorithm settings
             st.subheader("Extracted Algorithm Settings")
             algo = profile_dict.get("algorithm_settings", {})
@@ -1251,25 +1282,39 @@ with tab_results:
             # Assign colors
             variant_colors = get_variant_colors(variant_labels)
 
+            # Load NS reference trace if selected
+            _ns_ref_trace = None
+            _ns_ref_stats = None
+            if ns_ref_path:
+                try:
+                    with open(ns_ref_path) as _f:
+                        _ns_ref_data = json.load(_f)
+                    _ns_ref_trace = [tuple(p) for p in _ns_ref_data.get("median_trace", [])]
+                    _ns_ref_stats = _ns_ref_data
+                except Exception:
+                    pass
+
             # Spaghetti plot
             st.subheader("BG Traces")
-            fig = plot_spaghetti(traces_by_variant, variant_colors, n_paths, n_days)
+            fig = plot_spaghetti(traces_by_variant, variant_colors, n_paths, n_days,
+                                 ns_ref_trace=_ns_ref_trace)
             st.pyplot(fig)
             plt.close(fig)
 
             # Summary stats table
             st.subheader("Summary Statistics")
 
-            # Check if the loaded profile has NS reference stats
-            ref_stats = None
-            profile_path_loaded = st.session_state.get("loaded_profile", "")
-            if profile_path_loaded:
-                try:
-                    with open(profile_path_loaded) as _f:
-                        _pdata = json.load(_f)
-                    ref_stats = _pdata.get("ns_reference_stats")
-                except Exception:
-                    pass
+            # Use sidebar-selected NS reference, or fall back to profile-embedded stats
+            ref_stats = _ns_ref_stats
+            if not ref_stats:
+                profile_path_loaded = st.session_state.get("loaded_profile", "")
+                if profile_path_loaded:
+                    try:
+                        with open(profile_path_loaded) as _f:
+                            _pdata = json.load(_f)
+                        ref_stats = _pdata.get("ns_reference_stats")
+                    except Exception:
+                        pass
 
             n_cols = len(variant_labels) + (1 if ref_stats else 0)
             cols = st.columns(n_cols)

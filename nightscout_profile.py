@@ -31,6 +31,7 @@ from nightscout_query import (
     fetch_boluses,
     fetch_temp_basals,
     fetch_exercise,
+    compute_median_daily_trace,
 )
 from algorithms.openaps.iob import iob_total, find_insulin
 
@@ -849,6 +850,14 @@ def build_profile(
     # --- Step 4: BG stats ---
     bg_stats = extract_bg_stats(cgm_entries, tz)
 
+    # --- Median daily trace (for visual comparison) ---
+    try:
+        tz_offset_hours = tz.utcoffset(start_date.replace(tzinfo=None)).total_seconds() / 3600
+    except Exception:
+        tz_offset_hours = -5.0
+    median_trace = compute_median_daily_trace(cgm_entries, utc_offset_hours=tz_offset_hours)
+    print(f"  Median daily trace: {len(median_trace)} points")
+
     # --- Step 6: Insulin timeline (built but not included in profile) ---
     print("\nReconstructing insulin timeline...")
     # Use midpoint profile's basal schedule for gap-filling
@@ -945,6 +954,7 @@ def build_profile(
             "time_above_180": bg_stats["time_above_180"],
             "time_above_250": bg_stats["time_above_250"],
             "gmi": round(3.31 + 0.02392 * bg_stats["mean_bg"], 1),
+            "median_trace": median_trace,  # [(hour_from_7am, median_bg), ...]
         },
     }
 
@@ -988,6 +998,17 @@ def build_profile(
         print(f"\n  Saved to {output_path}")
 
     return profile
+
+
+def save_ns_reference(profile: dict, reference_path: str):
+    """Save the ns_reference_stats from a profile as a standalone reference file."""
+    ref = profile.get("ns_reference_stats")
+    if not ref:
+        return
+    Path(reference_path).parent.mkdir(parents=True, exist_ok=True)
+    with open(reference_path, "w") as f:
+        json.dump(ref, f, indent=4)
+    print(f"  NS reference saved to {reference_path}")
 
 
 # ─── Step 6: Insulin History Reconstruction ──────────────────────────────────
