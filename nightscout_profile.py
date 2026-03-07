@@ -669,6 +669,29 @@ def extract_exercise_pattern(
 
 # ─── Step 4: BG Stats ────────────────────────────────────────────────────────
 
+def _compute_bg_stats_from_values(sgv_values) -> dict:
+    """Compute BG reference stats from a list of SGV values.
+
+    Returns dict with mean_bg, sd_bg, tir, time_below_70, etc.
+    Returns empty dict if no values.
+    """
+    if not sgv_values:
+        return {}
+    arr = np.array(sgv_values)
+    mean_bg = float(np.mean(arr))
+    sd_bg = float(np.std(arr))
+    return {
+        "mean_bg": round(mean_bg, 0),
+        "sd_bg": round(sd_bg, 0),
+        "tir": round(float(np.mean((arr >= 70) & (arr <= 180)) * 100), 1),
+        "time_below_70": round(float(np.mean(arr < 70) * 100), 1),
+        "time_below_54": round(float(np.mean(arr < 54) * 100), 1),
+        "time_above_180": round(float(np.mean(arr > 180) * 100), 1),
+        "time_above_250": round(float(np.mean(arr > 250) * 100), 1),
+        "gmi": round(3.31 + 0.02392 * mean_bg, 1),
+    }
+
+
 def extract_bg_stats(entries: List[dict], tz: ZoneInfo) -> dict:
     """Compute BG statistics from CGM entries.
 
@@ -697,40 +720,23 @@ def extract_bg_stats(entries: List[dict], tz: ZoneInfo) -> dict:
         print("\n  No CGM data available.")
         return {"starting_bg": 120.0}
 
-    arr = np.array(sgv_values)
-    n_total = len(arr)
+    stats = _compute_bg_stats_from_values(sgv_values)
+    starting_bg = float(np.median(morning_values)) if morning_values else stats["mean_bg"]
 
-    mean_bg = float(np.mean(arr))
-    sd_bg = float(np.std(arr))
-    tir = float(np.mean((arr >= 70) & (arr <= 180)) * 100)
-    time_below_70 = float(np.mean(arr < 70) * 100)
-    time_below_54 = float(np.mean(arr < 54) * 100)
-    time_above_180 = float(np.mean(arr > 180) * 100)
-    time_above_250 = float(np.mean(arr > 250) * 100)
-
-    starting_bg = float(np.median(morning_values)) if morning_values else mean_bg
-
+    n_total = len(sgv_values)
     print(f"\n  CGM readings: {n_total}")
-    print(f"  Mean BG:      {mean_bg:.0f} mg/dL")
-    print(f"  SD:           {sd_bg:.0f} mg/dL")
-    print(f"  GMI:          {(3.31 + 0.02392 * mean_bg):.1f}%")
-    print(f"  TIR (70-180): {tir:.1f}%")
-    print(f"  Below 70:     {time_below_70:.1f}%")
-    print(f"  Below 54:     {time_below_54:.1f}%")
-    print(f"  Above 180:    {time_above_180:.1f}%")
-    print(f"  Above 250:    {time_above_250:.1f}%")
+    print(f"  Mean BG:      {stats['mean_bg']:.0f} mg/dL")
+    print(f"  SD:           {stats['sd_bg']:.0f} mg/dL")
+    print(f"  GMI:          {stats['gmi']}%")
+    print(f"  TIR (70-180): {stats['tir']:.1f}%")
+    print(f"  Below 70:     {stats['time_below_70']:.1f}%")
+    print(f"  Below 54:     {stats['time_below_54']:.1f}%")
+    print(f"  Above 180:    {stats['time_above_180']:.1f}%")
+    print(f"  Above 250:    {stats['time_above_250']:.1f}%")
     print(f"  Morning BG:   {starting_bg:.0f} mg/dL (median 7-8am, {len(morning_values)} readings)")
 
-    return {
-        "starting_bg": round(starting_bg, 0),
-        "mean_bg": round(mean_bg, 0),
-        "sd_bg": round(sd_bg, 0),
-        "tir": round(tir, 1),
-        "time_below_70": round(time_below_70, 1),
-        "time_below_54": round(time_below_54, 1),
-        "time_above_180": round(time_above_180, 1),
-        "time_above_250": round(time_above_250, 1),
-    }
+    stats["starting_bg"] = round(starting_bg, 0)
+    return stats
 
 
 # ─── Exercise Day Classification ─────────────────────────────────────────────
@@ -961,6 +967,12 @@ def build_profile(
     median_trace_exercise = compute_median_daily_trace(exercise_entries, utc_offset_hours=tz_offset_hours) if exercise_entries else []
     median_trace_rest = compute_median_daily_trace(rest_entries, utc_offset_hours=tz_offset_hours) if rest_entries else []
 
+    # BG stats split by day type
+    exercise_sgv = [e["sgv"] for e in exercise_entries if e.get("sgv") and e["sgv"] > 0]
+    rest_sgv = [e["sgv"] for e in rest_entries if e.get("sgv") and e["sgv"] > 0]
+    bg_stats_exercise = _compute_bg_stats_from_values(exercise_sgv)
+    bg_stats_rest = _compute_bg_stats_from_values(rest_sgv)
+
     print(f"  Median daily traces: all={len(median_trace)}, "
           f"exercise={len(median_trace_exercise)} ({len(exercise_dates)} days), "
           f"rest={len(median_trace_rest)} pts")
@@ -1060,7 +1072,9 @@ def build_profile(
             "time_below_54": bg_stats["time_below_54"],
             "time_above_180": bg_stats["time_above_180"],
             "time_above_250": bg_stats["time_above_250"],
-            "gmi": round(3.31 + 0.02392 * bg_stats["mean_bg"], 1),
+            "gmi": bg_stats.get("gmi", round(3.31 + 0.02392 * bg_stats["mean_bg"], 1)),
+            "stats_rest": bg_stats_rest,
+            "stats_exercise": bg_stats_exercise,
             "median_trace": median_trace,
             "median_trace_exercise": median_trace_exercise,
             "median_trace_rest": median_trace_rest,

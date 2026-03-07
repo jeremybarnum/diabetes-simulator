@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 
 from simulation import PatientProfile, MealSpec, ExerciseSpec, SimulationRun, SimulationRunResult
-from monte_carlo import compute_metrics, GlycemicMetrics, _algo_seed_offset, _profile_to_dict, build_variants
+from monte_carlo import compute_metrics, compute_metrics_by_day_type, GlycemicMetrics, _algo_seed_offset, _profile_to_dict, build_variants
 from nightscout_profile import build_profile as ns_build_profile
 
 try:
@@ -402,10 +402,11 @@ trace_day_filter = st.sidebar.radio(
 # ─── Helper functions ────────────────────────────────────────────────────────
 
 def run_paths(profile, algorithm_name, n_paths, n_days, seed, progress_cb=None, seed_label=None):
-    """Run n_paths simulations, return (traces_by_day, list of metrics, exercise_flags).
+    """Run n_paths simulations, return (traces_by_day, metrics_dict, exercise_flags).
 
     traces_by_day: list of lists. Each path produces n_days day-traces.
     Each day-trace is [(hours_in_day, bg), ...].
+    metrics_dict: {"all": [...], "rest": [...], "exercise": [...]} lists of GlycemicMetrics.
     exercise_flags: list of lists of bools, parallel to traces_by_day.
     progress_cb: optional callback(completed_count) called after each path.
     seed_label: label used for seed offset (defaults to algorithm_name).
@@ -415,14 +416,20 @@ def run_paths(profile, algorithm_name, n_paths, n_days, seed, progress_cb=None, 
     all_day_traces = []
     all_exercise_flags = []
     all_metrics = []
+    rest_metrics = []
+    exercise_metrics = []
     for i in range(n_paths):
         path_seed = seed + i * 1000 + _algo_seed_offset(seed_label)
         rng = np.random.RandomState(path_seed)
         sim = SimulationRun(profile=profile, algorithm_name=algorithm_name,
                             n_days=n_days, rng=rng)
         result = sim.run()
-        metrics = compute_metrics(result)
-        all_metrics.append(metrics)
+        m_all, m_rest, m_exercise = compute_metrics_by_day_type(result)
+        all_metrics.append(m_all)
+        if m_rest is not None:
+            rest_metrics.append(m_rest)
+        if m_exercise is not None:
+            exercise_metrics.append(m_exercise)
 
         path_days = []
         path_flags = []
@@ -436,7 +443,8 @@ def run_paths(profile, algorithm_name, n_paths, n_days, seed, progress_cb=None, 
 
         if progress_cb:
             progress_cb(i + 1)
-    return all_day_traces, all_metrics, all_exercise_flags
+    metrics_dict = {"all": all_metrics, "rest": rest_metrics, "exercise": exercise_metrics}
+    return all_day_traces, metrics_dict, all_exercise_flags
 
 
 def run_paths_cloud(variants, n_paths, n_days, seed, progress_cb=None):
@@ -457,19 +465,21 @@ def run_paths_cloud(variants, n_paths, n_days, seed, progress_cb=None):
         args_list.append((path_seed, variants, n_days))
 
     traces_by_variant = {name: [] for name in variant_labels}
-    metrics_by_variant = {name: [] for name in variant_labels}
+    metrics_by_variant = {name: {"all": [], "rest": [], "exercise": []} for name in variant_labels}
     flags_by_variant = {name: [] for name in variant_labels}
 
     completed = 0
     with modal_app.run():
         for result in run_path_remote.starmap(args_list, order_outputs=False):
             for variant_label, data in result.items():
-                metrics = data['metrics']
-                if isinstance(metrics, dict):
-                    metrics = GlycemicMetrics(**metrics)
-                metrics_by_variant[variant_label].append(metrics)
-
                 run_result = SimulationRunResult.from_dict(data['result'])
+                m_all, m_rest, m_exercise = compute_metrics_by_day_type(run_result)
+                metrics_by_variant[variant_label]["all"].append(m_all)
+                if m_rest is not None:
+                    metrics_by_variant[variant_label]["rest"].append(m_rest)
+                if m_exercise is not None:
+                    metrics_by_variant[variant_label]["exercise"].append(m_exercise)
+
                 path_days = []
                 path_flags = []
                 for day in run_result.days:
@@ -1427,43 +1437,75 @@ with tab_results:
                 except Exception:
                     pass
 
-        n_cols = len(variant_labels) + (1 if ref_stats else 0)
-        cols = st.columns(n_cols)
-        col_idx = 0
+        # Build summary table as DataFrame with rest/exercise/all columns
+        metric_rows = [
+            "Mean BG (mg/dL)", "SD BG (mg/dL)", "TIR 70-180 (%)",
+            "Time <70 (%)", "Time <54 (%)", "Time >180 (%)",
+            "Time >250 (%)", "CV (%)", "GMI (%)",
+            "Hypo events/wk", "Rescue events/wk", "Rescue carbs (g)/wk",
+        ]
+        _ns_keys = ["mean_bg", "sd_bg", "tir", "time_below_70", "time_below_54",
+                     "time_above_180", "time_above_250", None, "gmi",
+                     None, None, None]  # None = not available from NS
+
+        def _ns_col(stats_dict):
+            """Build a column of formatted values from an NS stats dict."""
+            if not stats_dict:
+                return ["—"] * len(metric_rows)
+            vals = []
+            for key in _ns_keys:
+                if key is None:
+                    vals.append("—")
+                else:
+                    v = stats_dict.get(key, "?")
+                    vals.append(f"{v}")
+            return vals
+
+        def _sim_col(metrics_list):
+            """Build a column of formatted values from a list of GlycemicMetrics."""
+            if not metrics_list:
+                return ["—"] * len(metric_rows)
+            return [
+                f"{np.mean([m.mean_bg for m in metrics_list]):.1f}",
+                f"{np.mean([m.sd_bg for m in metrics_list]):.1f}",
+                f"{np.mean([m.time_in_range for m in metrics_list]):.1f}",
+                f"{np.mean([m.time_below_70 for m in metrics_list]):.2f}",
+                f"{np.mean([m.time_below_54 for m in metrics_list]):.3f}",
+                f"{np.mean([m.time_above_180 for m in metrics_list]):.1f}",
+                f"{np.mean([m.time_above_250 for m in metrics_list]):.2f}",
+                f"{np.mean([m.cv for m in metrics_list]):.1f}",
+                f"{np.mean([m.gmi for m in metrics_list]):.2f}",
+                f"{np.mean([m.hypo_events for m in metrics_list]):.2f}",
+                f"{np.mean([m.rescue_carb_events for m in metrics_list]):.1f}",
+                f"{np.mean([m.rescue_carb_grams_total for m in metrics_list]):.0f}",
+            ]
+
+        # Build columns dict: {column_header: [values]}
+        columns = {}
 
         if ref_stats:
-            with cols[col_idx]:
-                st.markdown(f"**NS Reference**")
-                st.caption(f"{ref_stats.get('start_date', '?')} to {ref_stats.get('end_date', '?')}")
-                ref_display = {
-                    "Mean BG (mg/dL)": f"{ref_stats.get('mean_bg', '?')}",
-                    "SD BG (mg/dL)": f"{ref_stats.get('sd_bg', '?')}",
-                    "TIR 70-180 (%)": f"{ref_stats.get('tir', '?')}",
-                    "Time <70 (%)": f"{ref_stats.get('time_below_70', '?')}",
-                    "Time <54 (%)": f"{ref_stats.get('time_below_54', '?')}",
-                    "Time >180 (%)": f"{ref_stats.get('time_above_180', '?')}",
-                    "Time >250 (%)": f"{ref_stats.get('time_above_250', '?')}",
-                    "GMI (%)": f"{ref_stats.get('gmi', '?')}",
-                }
-                for metric, value in ref_display.items():
-                    st.metric(metric, value)
-            col_idx += 1
+            columns["NS All"] = _ns_col(ref_stats)
+            columns["NS Rest"] = _ns_col(ref_stats.get("stats_rest"))
+            columns["NS Exercise"] = _ns_col(ref_stats.get("stats_exercise"))
 
         for vlabel in variant_labels:
-            with cols[col_idx]:
-                display = _variant_display_name(vlabel)
-                st.markdown(f"**{display}**")
-                stats = compute_summary_stats(metrics_by_variant[vlabel])
-                for metric, value in stats.items():
-                    st.metric(metric, value)
-            col_idx += 1
+            display = _variant_display_name(vlabel)
+            mdict = metrics_by_variant[vlabel]
+            columns[f"{display} All"] = _sim_col(mdict["all"])
+            columns[f"{display} Rest"] = _sim_col(mdict["rest"])
+            columns[f"{display} Exercise"] = _sim_col(mdict["exercise"])
+
+        df = pd.DataFrame(columns, index=metric_rows)
+        if ref_stats:
+            st.caption(f"NS Reference: {ref_stats.get('start_date', '?')} to {ref_stats.get('end_date', '?')}")
+        st.dataframe(df, use_container_width=True)
 
         # Head-to-head (if exactly 2 variants)
         if len(variant_labels) == 2:
             st.subheader("Head-to-Head")
             a, b = variant_labels
-            ma = metrics_by_variant[a]
-            mb = metrics_by_variant[b]
+            ma = metrics_by_variant[a]["all"]
+            mb = metrics_by_variant[b]["all"]
             n = min(len(ma), len(mb))
 
             tir_a_wins = sum(1 for x, y in zip(ma[:n], mb[:n])

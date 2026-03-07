@@ -2,48 +2,111 @@
     "meals_rest": [
         {
             "time_of_day_minutes": 30,
-            "carbs_mean": 7,
-            "carbs_sd": 1,
+            "carbs_mean": 7.0,
+            "carbs_sd": 1.0,
             "absorption_hrs": 1.0,
-            "carb_count_sigma": 0
+            "declared": true,
+            "carb_count_sigma": 0.0
         },
         {
             "time_of_day_minutes": 150,
-            "carbs_mean": 15,
-            "carbs_sd": 3,
+            "carbs_mean": 15.0,
+            "carbs_sd": 3.0,
             "absorption_hrs": 3.0,
+            "declared": true,
             "carb_count_sigma": 0.2
         },
         {
             "time_of_day_minutes": 360,
-            "carbs_mean": 20,
-            "carbs_sd": 5,
+            "carbs_mean": 20.0,
+            "carbs_sd": 5.0,
             "absorption_hrs": 3.0,
+            "declared": true,
             "carb_count_sigma": 0.35
         },
         {
             "time_of_day_minutes": 540,
-            "carbs_mean": 7,
-            "carbs_sd": 2,
+            "carbs_mean": 7.0,
+            "carbs_sd": 2.0,
             "absorption_hrs": 3.0,
+            "declared": true,
             "carb_count_sigma": 0.15
         },
         {
             "time_of_day_minutes": 660,
-            "carbs_mean": 20,
-            "carbs_sd": 6,
+            "carbs_mean": 20.0,
+            "carbs_sd": 6.0,
             "absorption_hrs": 3.0,
+            "declared": true,
             "carb_count_sigma": 0.35
         },
         {
             "time_of_day_minutes": 840,
-            "carbs_mean": 10,
-            "carbs_sd": 3,
+            "carbs_mean": 10.0,
+            "carbs_sd": 3.0,
             "absorption_hrs": 3.0,
+            "declared": true,
             "carb_count_sigma": 0.35
         }
     ],
-    "meals_exercise": [],
+    "meals_exercise": [
+        {
+            "time_of_day_minutes": 30,
+            "carbs_mean": 7.0,
+            "carbs_sd": 1.0,
+            "absorption_hrs": 1.0,
+            "declared": true,
+            "carb_count_sigma": 0.0
+        },
+        {
+            "time_of_day_minutes": 150,
+            "carbs_mean": 15.0,
+            "carbs_sd": 3.0,
+            "absorption_hrs": 3.0,
+            "declared": true,
+            "carb_count_sigma": 0.2
+        },
+        {
+            "time_of_day_minutes": 300,
+            "carbs_mean": 10.0,
+            "carbs_sd": 0.0,
+            "absorption_hrs": 2.0,
+            "declared": true,
+            "carb_count_sigma": 0.0
+        },
+        {
+            "time_of_day_minutes": 390,
+            "carbs_mean": 20.0,
+            "carbs_sd": 4.0,
+            "absorption_hrs": 3.0,
+            "declared": true,
+            "carb_count_sigma": 0.35
+        },
+        {
+            "time_of_day_minutes": 540,
+            "carbs_mean": 7.0,
+            "carbs_sd": 2.0,
+            "absorption_hrs": 3.0,
+            "declared": true,
+            "carb_count_sigma": 0.35
+        },
+        {
+            "time_of_day_minutes": 720,
+            "carbs_mean": 15.0,
+            "carbs_sd": 6.0,
+            "absorption_hrs": 3.0,
+            "declared": true,
+            "carb_count_sigma": 0.35
+        },
+        {
+            "time_of_day_minutes": 840,
+            "carbs_mean": 10.0,
+            "carbs_sd": 3.0,
+            "absorption_hrs": 3.0,
+            "declared": true,
+            "carb_count_sigma": 0.35
+        }
+    ],
     "undeclared_meals_rest": [],
     "undeclared_meals_exercise": [],
     "carb_count_sigma": 0.35,
@@ -51,9 +114,14 @@
     "absorption_sigma": 0.2,
     "undeclared_meal_prob": 0.1,
     "sensitivity_sigma": 0.15,
-    "rescue_carbs_declared_pct": 0.5,
     "exercise_days": [0, 2, 4, 5],
     "starting_bg": 100.0,
+    "rescue_carbs_enabled": true,
+    "rescue_threshold": 65,
+    "rescue_carbs_grams": 8,
+    "rescue_absorption_hrs": 1.0,
+    "rescue_cooldown_min": 15,
+    "rescue_carbs_declared_pct": 0.5,
     "exercise_spec": {
         "time_of_day_minutes": 330,
         "declared_scalar": 0.5,
@@ -62,5 +130,19 @@
         "actual_scalar_sigma": 0.15,
         "actual_duration_hrs_mean": 6.0,
         "actual_duration_hrs_sigma": 0.2
+    },
+    "algorithm_settings": {
+        "insulin_sensitivity_factor": 100.0,
+        "carb_ratio": 10.0,
+        "basal_rate": 0.45,
+        "duration_of_insulin_action": 6.0,
+        "target": 100.0,
+        "suspend_threshold": 80.0,
+        "max_basal_rate": 2.8,
+        "max_bolus": 3.0,
+        "insulin_type": "rapid_acting_adult",
+        "enable_irc": true,
+        "enable_momentum": true,
+        "enable_dca": true
     }
 }

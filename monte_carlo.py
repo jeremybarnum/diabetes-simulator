@@ -50,9 +50,11 @@ class GlycemicMetrics:
     n_readings: int = 0
 
 
-def compute_metrics(result: SimulationRunResult) -> GlycemicMetrics:
-    """Compute glycemic metrics from a simulation run."""
-    bgs = result.all_bg_values()
+def _metrics_from_days(days) -> GlycemicMetrics:
+    """Compute glycemic metrics from a list of DayResult objects."""
+    bgs = []
+    for day in days:
+        bgs.extend(bg for _, bg in day.bg_trace)
     if not bgs:
         return GlycemicMetrics()
 
@@ -62,7 +64,6 @@ def compute_metrics(result: SimulationRunResult) -> GlycemicMetrics:
     mean_bg = float(np.mean(arr))
     sd_bg = float(np.std(arr))
     cv = (sd_bg / mean_bg * 100) if mean_bg > 0 else 0
-    # GMI formula: GMI(%) = 3.31 + 0.02392 × mean glucose (mg/dL)
     gmi = 3.31 + 0.02392 * mean_bg
 
     tir = float(np.sum((arr >= 70) & (arr <= 180)) / n * 100)
@@ -84,8 +85,8 @@ def compute_metrics(result: SimulationRunResult) -> GlycemicMetrics:
     if consecutive_low >= 3:
         hypo_events += 1
 
-    rescue_events = sum(d.rescue_carb_events for d in result.days)
-    rescue_grams = sum(d.rescue_carb_grams_total for d in result.days)
+    rescue_events = sum(d.rescue_carb_events for d in days)
+    rescue_grams = sum(d.rescue_carb_grams_total for d in days)
 
     return GlycemicMetrics(
         mean_bg=mean_bg,
@@ -104,6 +105,25 @@ def compute_metrics(result: SimulationRunResult) -> GlycemicMetrics:
         rescue_carb_grams_total=rescue_grams,
         n_readings=n,
     )
+
+
+def compute_metrics(result: SimulationRunResult) -> GlycemicMetrics:
+    """Compute glycemic metrics from a simulation run (all days)."""
+    return _metrics_from_days(result.days)
+
+
+def compute_metrics_by_day_type(result: SimulationRunResult):
+    """Compute metrics split by day type.
+
+    Returns (all_metrics, rest_metrics, exercise_metrics).
+    rest/exercise may be None if no days of that type exist.
+    """
+    all_m = _metrics_from_days(result.days)
+    rest_days = [d for d in result.days if not d.is_exercise_day]
+    exercise_days = [d for d in result.days if d.is_exercise_day]
+    rest_m = _metrics_from_days(rest_days) if rest_days else None
+    exercise_m = _metrics_from_days(exercise_days) if exercise_days else None
+    return all_m, rest_m, exercise_m
 
 
 # ─── Seeding ─────────────────────────────────────────────────────────────────
