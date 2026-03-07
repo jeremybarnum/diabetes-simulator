@@ -43,7 +43,7 @@
     "undeclared_meal_prob": 0.0,
     "undeclared_meals": [],
     "sensitivity_sigma": 0.262,
-    "exercises_per_week": 2.0,
+    "exercise_days": [2, 5],
     "starting_bg": 112.0,
     "rescue_carbs_enabled": true,
     "rescue_threshold": 65.0,

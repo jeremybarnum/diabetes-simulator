@@ -83,7 +83,7 @@ def save_profile_to_json(file_path: str):
         "absorption_sigma": profile.absorption_sigma,
         "undeclared_meal_prob": profile.undeclared_meal_prob,
         "sensitivity_sigma": profile.sensitivity_sigma,
-        "exercises_per_week": profile.exercises_per_week,
+        "exercise_days": profile.exercise_days,
         "starting_bg": profile.starting_bg,
         "rescue_carbs_enabled": profile.rescue_carbs_enabled,
         "rescue_threshold": profile.rescue_threshold,
@@ -166,7 +166,9 @@ def load_profile_to_state(profile_path: str):
     st.session_state["starting_bg_sl"] = int(profile.starting_bg)
 
     # Exercise
-    st.session_state["exercises_per_week_sl"] = float(profile.exercises_per_week)
+    DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    for i, name in enumerate(DAY_NAMES):
+        st.session_state[f"ex_day_{i}_cb"] = i in profile.exercise_days
     if profile.exercise_spec:
         ex = profile.exercise_spec
         st.session_state["ex_time_in"] = _minutes_to_clock(ex.time_of_day_minutes)
@@ -246,8 +248,8 @@ def build_profile_from_state() -> PatientProfile:
 
     # Exercise
     exercise_spec = None
-    epw = st.session_state.get("exercises_per_week_sl", 0.0)
-    if epw > 0:
+    exercise_days = [i for i in range(7) if st.session_state.get(f"ex_day_{i}_cb", False)]
+    if exercise_days:
         exercise_spec = ExerciseSpec(
             time_of_day_minutes=_clock_to_minutes(
                 st.session_state.get("ex_time_in", "17:00")),
@@ -283,7 +285,7 @@ def build_profile_from_state() -> PatientProfile:
         undeclared_meal_prob=st.session_state.get("undeclared_meal_prob_sl", 0.0),
         undeclared_meals=undeclared_meals,
         sensitivity_sigma=st.session_state.get("sensitivity_sigma_sl", 0.15),
-        exercises_per_week=epw,
+        exercise_days=exercise_days,
         exercise_spec=exercise_spec,
         starting_bg=float(st.session_state.get("starting_bg_sl", 120)),
         rescue_carbs_enabled=st.session_state.get("rescue_enabled_cb", True),
@@ -371,13 +373,13 @@ selected_ns_ref = st.sidebar.selectbox(
     help="Overlay the real Nightscout median BG trace on the spaghetti plot for comparison.",
 )
 ns_ref_path = ns_ref_names[selected_ns_ref]
-ns_ref_trace_type = st.sidebar.radio(
-    "Reference trace",
+trace_day_filter = st.sidebar.radio(
+    "Day filter",
     ["All days", "Rest days", "Exercise days"],
     index=0,
     horizontal=True,
-    help="Which subset of days to show in the NS overlay.",
-) if ns_ref_path else "All days"
+    help="Filter both sim traces and NS overlay by exercise vs rest days.",
+)
 
 run_button = st.sidebar.button("Run Simulation", type="primary", use_container_width=True)
 
@@ -385,16 +387,18 @@ run_button = st.sidebar.button("Run Simulation", type="primary", use_container_w
 # ─── Helper functions ────────────────────────────────────────────────────────
 
 def run_paths(profile, algorithm_name, n_paths, n_days, seed, progress_cb=None, seed_label=None):
-    """Run n_paths simulations, return (traces_by_day, list of metrics).
+    """Run n_paths simulations, return (traces_by_day, list of metrics, exercise_flags).
 
     traces_by_day: list of lists. Each path produces n_days day-traces.
     Each day-trace is [(hours_in_day, bg), ...].
+    exercise_flags: list of lists of bools, parallel to traces_by_day.
     progress_cb: optional callback(completed_count) called after each path.
     seed_label: label used for seed offset (defaults to algorithm_name).
     """
     if seed_label is None:
         seed_label = algorithm_name
     all_day_traces = []
+    all_exercise_flags = []
     all_metrics = []
     for i in range(n_paths):
         path_seed = seed + i * 1000 + _algo_seed_offset(seed_label)
@@ -406,19 +410,22 @@ def run_paths(profile, algorithm_name, n_paths, n_days, seed, progress_cb=None, 
         all_metrics.append(metrics)
 
         path_days = []
+        path_flags = []
         for day in result.days:
             day_offset_min = day.day_index * 1440
             trace = [((t_rel - day_offset_min) / 60, bg) for t_rel, bg in day.bg_trace]
             path_days.append(trace)
+            path_flags.append(day.is_exercise_day)
         all_day_traces.append(path_days)
+        all_exercise_flags.append(path_flags)
 
         if progress_cb:
             progress_cb(i + 1)
-    return all_day_traces, all_metrics
+    return all_day_traces, all_metrics, all_exercise_flags
 
 
 def run_paths_cloud(variants, n_paths, n_days, seed, progress_cb=None):
-    """Run all paths on Modal cloud workers. Returns (traces_by_variant, metrics_by_variant).
+    """Run all paths on Modal cloud workers. Returns (traces, metrics, exercise_flags) by variant.
 
     variants: list of (variant_label, profile_dict, algo_name) tuples from build_variants().
     Each Modal worker runs one path for all variants. Results are collected
@@ -436,6 +443,7 @@ def run_paths_cloud(variants, n_paths, n_days, seed, progress_cb=None):
 
     traces_by_variant = {name: [] for name in variant_labels}
     metrics_by_variant = {name: [] for name in variant_labels}
+    flags_by_variant = {name: [] for name in variant_labels}
 
     completed = 0
     with modal_app.run():
@@ -448,18 +456,21 @@ def run_paths_cloud(variants, n_paths, n_days, seed, progress_cb=None):
 
                 run_result = SimulationRunResult.from_dict(data['result'])
                 path_days = []
+                path_flags = []
                 for day in run_result.days:
                     day_offset_min = day.day_index * 1440
                     trace = [((t_rel - day_offset_min) / 60, bg)
                              for t_rel, bg in day.bg_trace]
                     path_days.append(trace)
+                    path_flags.append(day.is_exercise_day)
                 traces_by_variant[variant_label].append(path_days)
+                flags_by_variant[variant_label].append(path_flags)
 
             completed += 1
             if progress_cb:
                 progress_cb(completed / n_paths)
 
-    return traces_by_variant, metrics_by_variant
+    return traces_by_variant, metrics_by_variant, flags_by_variant
 
 
 def plot_spaghetti(traces_by_algo, algo_colors, n_paths, n_days,
@@ -675,16 +686,15 @@ with tab_patient:
     st.divider()
 
     st.subheader("Exercise")
-    st.slider(
-        "Exercise sessions per week",
-        min_value=0.0, max_value=7.0, step=0.5,
-        key="exercises_per_week_sl",
-        help="Each day independently has a chance of exercise = sessions/7. "
-             "Exercise increases insulin sensitivity, and the mismatch between "
-             "declared and actual effect creates a realistic challenge.",
-    )
+    st.caption("Select which days of the week have exercise. Day 0 = Monday.")
+    _ex_day_cols = st.columns(7)
+    _DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    for i, (_col, _name) in enumerate(zip(_ex_day_cols, _DAY_NAMES)):
+        with _col:
+            st.checkbox(_name, key=f"ex_day_{i}_cb")
 
-    if st.session_state["exercises_per_week_sl"] > 0:
+    _any_exercise = any(st.session_state.get(f"ex_day_{i}_cb", False) for i in range(7))
+    if _any_exercise:
         st.markdown("**Exercise Parameters**")
         ex_col1, ex_col2, ex_col3 = st.columns(3)
         with ex_col1:
@@ -836,7 +846,7 @@ with tab_patient:
                 "absorption_sigma": profile.absorption_sigma,
                 "undeclared_meal_prob": profile.undeclared_meal_prob,
                 "sensitivity_sigma": profile.sensitivity_sigma,
-                "exercises_per_week": profile.exercises_per_week,
+                "exercise_days": profile.exercise_days,
                 "starting_bg": profile.starting_bg,
                 "rescue_carbs_enabled": profile.rescue_carbs_enabled,
                 "rescue_threshold": profile.rescue_threshold,
@@ -1146,11 +1156,13 @@ with tab_ns:
                 st.info("No meal patterns detected.")
 
             # Exercise
-            epw = profile_dict.get("exercises_per_week", 0)
-            if epw > 0:
+            ex_days = profile_dict.get("exercise_days", [])
+            if ex_days:
                 st.subheader("Exercise")
+                _day_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+                day_str = ", ".join(_day_labels[d] for d in sorted(ex_days) if d < 7)
                 ex = profile_dict.get("exercise_spec", {})
-                st.write(f"**{epw}x/week** at {_minutes_to_clock(ex.get('time_of_day_minutes', 0))}")
+                st.write(f"**{day_str}** at {_minutes_to_clock(ex.get('time_of_day_minutes', 0))}")
 
             # Starting BG
             st.metric("Starting BG (morning median)", f"{profile_dict.get('starting_bg', '?')} mg/dL")
@@ -1210,6 +1222,7 @@ with tab_results:
 
             traces_by_variant = {}
             metrics_by_variant = {}
+            flags_by_variant = {}
 
             import time as _time
             if len(variant_labels) <= 3:
@@ -1253,7 +1266,7 @@ with tab_results:
                                 text=f"Cloud: {done}/{n_paths} paths — "
                                      f"{elapsed:.0f}s elapsed, {eta}")
 
-                    traces_by_variant, metrics_by_variant = run_paths_cloud(
+                    traces_by_variant, metrics_by_variant, flags_by_variant = run_paths_cloud(
                         cloud_variants, n_paths, n_days, seed,
                         progress_cb=update_progress)
                     cloud_success = True
@@ -1280,11 +1293,12 @@ with tab_results:
 
                     progress.progress(paths_done / total_paths,
                         text=f"{display}: starting ({paths_done}/{total_paths} total)...")
-                    traces, metrics = run_paths(
+                    traces, metrics, ex_flags = run_paths(
                         pobj, algo_name, n_paths, n_days, seed,
                         progress_cb=local_progress_cb, seed_label=vlabel)
                     traces_by_variant[vlabel] = traces
                     metrics_by_variant[vlabel] = metrics
+                    flags_by_variant[vlabel] = ex_flags
                     paths_done += n_paths
 
             elapsed_total = _time.time() - t_start
@@ -1298,6 +1312,7 @@ with tab_results:
             # Cache results in session state so trace toggle can redraw without rerun
             st.session_state["_sim_traces"] = traces_by_variant
             st.session_state["_sim_metrics"] = metrics_by_variant
+            st.session_state["_sim_flags"] = flags_by_variant
             st.session_state["_sim_variant_labels"] = variant_labels
             st.session_state["_sim_variant_colors"] = variant_colors
             st.session_state["_sim_n_paths"] = n_paths
@@ -1307,10 +1322,28 @@ with tab_results:
     if "_sim_traces" in st.session_state:
         traces_by_variant = st.session_state["_sim_traces"]
         metrics_by_variant = st.session_state["_sim_metrics"]
+        flags_by_variant = st.session_state.get("_sim_flags", {})
         variant_labels = st.session_state["_sim_variant_labels"]
         variant_colors = st.session_state["_sim_variant_colors"]
         n_paths = st.session_state["_sim_n_paths"]
         n_days = st.session_state["_sim_n_days"]
+
+        # Filter traces by exercise/rest day
+        filtered_traces = {}
+        for vlabel in variant_labels:
+            all_traces = traces_by_variant[vlabel]
+            all_flags = flags_by_variant.get(vlabel, [])
+            if trace_day_filter == "All days" or not all_flags:
+                filtered_traces[vlabel] = all_traces
+            else:
+                want_exercise = (trace_day_filter == "Exercise days")
+                filtered = []
+                for path_days, path_flags in zip(all_traces, all_flags):
+                    filtered_days = [d for d, f in zip(path_days, path_flags)
+                                     if f == want_exercise]
+                    if filtered_days:
+                        filtered.append(filtered_days)
+                filtered_traces[vlabel] = filtered
 
         # Load NS reference trace (re-evaluated on every render, so toggle changes take effect)
         _ns_ref_trace = None
@@ -1323,7 +1356,7 @@ with tab_results:
                     "All days": "median_trace",
                     "Rest days": "median_trace_rest",
                     "Exercise days": "median_trace_exercise",
-                }.get(ns_ref_trace_type, "median_trace")
+                }.get(trace_day_filter, "median_trace")
                 _raw_trace = _ns_ref_data.get(_trace_key) or _ns_ref_data.get("median_trace", [])
                 _ns_ref_trace = [tuple(p) for p in _raw_trace]
                 _ns_ref_stats = _ns_ref_data
@@ -1332,8 +1365,8 @@ with tab_results:
 
         # Spaghetti plot
         st.subheader("BG Traces")
-        _ref_label = f"NS {ns_ref_trace_type}" if ns_ref_path else "NS Reference"
-        fig = plot_spaghetti(traces_by_variant, variant_colors, n_paths, n_days,
+        _ref_label = f"NS {trace_day_filter}" if ns_ref_path else "NS Reference"
+        fig = plot_spaghetti(filtered_traces, variant_colors, n_paths, n_days,
                              ns_ref_trace=_ns_ref_trace, ns_ref_label=_ref_label)
         st.pyplot(fig)
         plt.close(fig)

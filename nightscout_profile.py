@@ -786,6 +786,26 @@ def _classify_exercise_days(treatments: List[dict], tz: ZoneInfo) -> set:
     return exercise_dates
 
 
+def _pick_exercise_days(exercise_dates: set, exercises_per_week: float) -> list:
+    """Convert a set of exercise date strings into a list of weekday indices (0=Mon, 6=Sun).
+
+    Picks the N most common weekdays from the actual exercise dates,
+    where N = round(exercises_per_week).
+    """
+    from collections import Counter
+    n = round(exercises_per_week)
+    if n <= 0 or not exercise_dates:
+        return []
+    weekday_counts = Counter()
+    for d_str in exercise_dates:
+        try:
+            d = datetime.fromisoformat(d_str).date() if isinstance(d_str, str) else d_str
+            weekday_counts[d.weekday()] += 1
+        except (ValueError, AttributeError):
+            continue
+    return sorted([day for day, _ in weekday_counts.most_common(min(n, 7))])
+
+
 def _split_entries_by_exercise(
     cgm_entries: List[dict],
     exercise_dates: set,
@@ -1019,7 +1039,7 @@ def build_profile(
         "undeclared_meal_prob": 0.0,
         "undeclared_meals": [],
         "sensitivity_sigma": l2_sensitivity_sigma,
-        "exercises_per_week": exercises_per_week,
+        "exercise_days": _pick_exercise_days(exercise_dates, exercises_per_week),
         "starting_bg": bg_stats["starting_bg"],
         "rescue_carbs_enabled": True,
         "rescue_threshold": 65.0,
@@ -1061,7 +1081,10 @@ def build_profile(
     print(f"    ISF:         {merged_settings.get('insulin_sensitivity_factor', '?')} mg/dL/U")
     print(f"    Target:      {merged_settings.get('target', '?')} mg/dL")
     print(f"    Meals:       {len(meal_specs)} slots")
-    print(f"    Exercise:    {exercises_per_week}/week")
+    _day_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    _ex_days = profile.get("exercise_days", [])
+    _ex_str = ", ".join(_day_labels[d] for d in _ex_days) if _ex_days else "none"
+    print(f"    Exercise:    {_ex_str} ({len(_ex_days)}/week)")
     print(f"    Starting BG: {bg_stats['starting_bg']} mg/dL")
     if layer2:
         print(f"\n  Estimated from deviation analysis (Layer 2):")

@@ -490,7 +490,7 @@ def test_exercise_check():
             carb_count_bias=0.0,
             sensitivity_sigma=0.0,
             starting_bg=100.0,  # Start at target to isolate exercise effect
-            exercises_per_week=7.0,
+            exercise_days=[0, 1, 2, 3, 4, 5, 6],
             exercise_spec=ex_spec,
             rescue_carbs_enabled=False,
             algorithm_settings=settings,

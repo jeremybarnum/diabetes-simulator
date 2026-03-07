@@ -78,7 +78,7 @@ class PatientProfile:
     sensitivity_sigma: float = 0.15
 
     # Exercise
-    exercises_per_week: float = 0.0
+    exercise_days: List[int] = field(default_factory=list)  # 0=Mon, 6=Sun
     exercise_spec: Optional[ExerciseSpec] = None
 
     # Starting BG
@@ -130,7 +130,7 @@ class PatientProfile:
             undeclared_meal_prob=data.get('undeclared_meal_prob', 0.0),
             undeclared_meals=undeclared_meals,
             sensitivity_sigma=data.get('sensitivity_sigma', 0.15),
-            exercises_per_week=data.get('exercises_per_week', 0.0),
+            exercise_days=data.get('exercise_days', []),
             exercise_spec=exercise_spec,
             starting_bg=data.get('starting_bg', 100.0),
             rescue_carbs_enabled=data.get('rescue_carbs_enabled', True),
@@ -162,6 +162,7 @@ class DayResult:
     meals: List[MealEvent]
     exercises: List[ExerciseEvent]
     sensitivity_trace: List[Tuple[float, float]]  # [(time, scalar), ...]
+    is_exercise_day: bool = False
     rescue_carb_events: int = 0
     rescue_carb_grams_total: float = 0.0
 
@@ -187,6 +188,7 @@ class DayResult:
                 for e in self.exercises
             ],
             'sensitivity_trace': self.sensitivity_trace,
+            'is_exercise_day': self.is_exercise_day,
             'rescue_carb_events': self.rescue_carb_events,
             'rescue_carb_grams_total': self.rescue_carb_grams_total,
         }
@@ -202,6 +204,7 @@ class DayResult:
             meals=meals,
             exercises=exercises,
             sensitivity_trace=[tuple(p) for p in d.get('sensitivity_trace', [])],
+            is_exercise_day=d.get('is_exercise_day', False),
             rescue_carb_events=d.get('rescue_carb_events', 0),
             rescue_carb_grams_total=d.get('rescue_carb_grams_total', 0.0),
         )
@@ -531,15 +534,17 @@ class SimulationRun:
 
             # --- Start new day (must be first so rescue/recording can reference it) ---
             if step_in_day == 0:
+                day_exercises = [e for e in exercise_events
+                                 if day_index * 1440 <= (e.start_time_minutes - self.t0_min) < (day_index + 1) * 1440]
                 day_results.append(DayResult(
                     day_index=day_index,
                     bg_trace=[],
                     bolus_history=[],
                     meals=[m for m in all_meals
                            if day_index * 1440 <= (m.time_minutes - self.t0_min) < (day_index + 1) * 1440],
-                    exercises=[e for e in exercise_events
-                               if day_index * 1440 <= (e.start_time_minutes - self.t0_min) < (day_index + 1) * 1440],
+                    exercises=day_exercises,
                     sensitivity_trace=[],
+                    is_exercise_day=len(day_exercises) > 0,
                 ))
 
             # --- Check for meals at this step ---
@@ -746,16 +751,20 @@ class SimulationRun:
         return meals
 
     def _generate_exercise_events(self) -> List[ExerciseEvent]:
-        """Generate exercise events across the full simulation."""
-        if self.profile.exercises_per_week <= 0 or self.profile.exercise_spec is None:
+        """Generate exercise events across the full simulation.
+
+        Exercise occurs deterministically on days where day_index % 7 is in
+        profile.exercise_days. Intensity/duration are still stochastic.
+        """
+        if not self.profile.exercise_days or self.profile.exercise_spec is None:
             return []
 
         events = []
         spec = self.profile.exercise_spec
-        exercise_prob_per_day = self.profile.exercises_per_week / 7.0
+        exercise_day_set = set(self.profile.exercise_days)
 
         for day in range(self.n_days):
-            if self.rng.random() < exercise_prob_per_day:
+            if day % 7 in exercise_day_set:
                 day_offset = self.t0_min + day * 1440
                 start = day_offset + spec.time_of_day_minutes
 

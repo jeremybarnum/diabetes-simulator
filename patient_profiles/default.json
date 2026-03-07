@@ -8,7 +8,7 @@
     "carb_count_sigma": 0.25,
     "absorption_sigma": 0.35,
     "sensitivity_sigma": 0.10,
-    "exercises_per_week": 4,
+    "exercise_days": [0, 2, 4, 5],
     "exercise_spec": {
         "time_of_day_minutes": 360,
         "declared_scalar": 0.5,

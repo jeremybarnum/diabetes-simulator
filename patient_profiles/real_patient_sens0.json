@@ -51,7 +51,7 @@
     "undeclared_meal_prob": 0.1,
     "sensitivity_sigma": 0.0,
     "rescue_carbs_declared_pct": 0.5,
-    "exercises_per_week": 4.0,
+    "exercise_days": [0, 2, 4, 5],
     "starting_bg": 100.0,
     "exercise_spec": {
         "time_of_day_minutes": 330,
