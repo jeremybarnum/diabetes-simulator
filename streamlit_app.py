@@ -796,6 +796,48 @@ with tab_patient:
                 st.session_state["loaded_profile"] = save_path
                 st.success(f"Saved as **{filename}**. Reload the page to see it in the dropdown.")
 
+    st.divider()
+
+    # ─── Export JSON ─────────────────────────────────────────────────────────
+    with st.expander("Export Profile JSON"):
+        if st.button("Show profile JSON"):
+            profile = build_profile_from_state()
+            export_data = {
+                "meals": [{"time_of_day_minutes": m.time_of_day_minutes,
+                           "carbs_mean": m.carbs_mean, "carbs_sd": m.carbs_sd,
+                           "absorption_hrs": m.absorption_hrs} for m in profile.meals],
+                "undeclared_meals": [{"time_of_day_minutes": m.time_of_day_minutes,
+                                     "carbs_mean": m.carbs_mean, "carbs_sd": m.carbs_sd,
+                                     "absorption_hrs": m.absorption_hrs} for m in profile.undeclared_meals],
+                "carb_count_sigma": profile.carb_count_sigma,
+                "carb_count_bias": profile.carb_count_bias,
+                "absorption_sigma": profile.absorption_sigma,
+                "undeclared_meal_prob": profile.undeclared_meal_prob,
+                "sensitivity_sigma": profile.sensitivity_sigma,
+                "exercises_per_week": profile.exercises_per_week,
+                "starting_bg": profile.starting_bg,
+                "rescue_carbs_enabled": profile.rescue_carbs_enabled,
+                "rescue_threshold": profile.rescue_threshold,
+                "rescue_carbs_grams": profile.rescue_carbs_grams,
+                "rescue_absorption_hrs": profile.rescue_absorption_hrs,
+                "rescue_cooldown_min": profile.rescue_cooldown_min,
+                "rescue_carbs_declared_pct": profile.rescue_carbs_declared_pct,
+            }
+            if profile.exercise_spec:
+                ex = profile.exercise_spec
+                export_data["exercise_spec"] = {
+                    "time_of_day_minutes": ex.time_of_day_minutes,
+                    "declared_scalar": ex.declared_scalar,
+                    "declared_duration_hrs": ex.declared_duration_hrs,
+                    "actual_scalar_mean": ex.actual_scalar_mean,
+                    "actual_scalar_sigma": ex.actual_scalar_sigma,
+                    "actual_duration_hrs_mean": ex.actual_duration_hrs_mean,
+                    "actual_duration_hrs_sigma": ex.actual_duration_hrs_sigma,
+                }
+            if profile.algorithm_settings:
+                export_data["algorithm_settings"] = profile.algorithm_settings
+            st.code(json.dumps(export_data, indent=2), language="json")
+
 
 # ─── Tab 3: Algorithm & Therapy Settings ──────────────────────────────────────────────
 

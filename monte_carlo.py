@@ -300,7 +300,7 @@ def run_monte_carlo(
     n_paths: int = 100,
     n_days: int = 7,
     seed: int = 42,
-    max_workers: int = 1,
+    max_workers: int = 0,
     profiles: Optional[List[Tuple[str, PatientProfile]]] = None,
 ) -> Dict[str, MonteCarloResults]:
     """
@@ -345,6 +345,11 @@ def run_monte_carlo(
             mc_results[name].all_metrics.append(data['metrics'])
             mc_results[name].all_run_results.append(
                 SimulationRunResult.from_dict(data['result']))
+
+    # Resolve 0 → cpu_count (auto-parallel)
+    if max_workers <= 0:
+        import os
+        max_workers = os.cpu_count() or 4
 
     if max_workers <= 1:
         # Sequential
