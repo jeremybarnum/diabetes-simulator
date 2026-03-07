@@ -977,7 +977,7 @@ with tab_ns:
             help="Determines the insulin activity curve used for deviation analysis"
         )
         ns_meal_times_str = st.text_input(
-            "Meal times (clock hours)", value="",
+            "Meal times (clock hours)",
             key="ns_meal_times",
             placeholder="e.g. 8, 13, 19",
             help="Comma-separated clock hours. Carb entries are bucketed to the nearest meal. Leave blank for auto-detect."
@@ -1006,11 +1006,12 @@ with tab_ns:
                     _end = (datetime.combine(ns_end_date, datetime.min.time()).replace(tzinfo=_tz.utc)
                             if ns_end_date else None)
                     _meal_times = None
-                    if ns_meal_times_str.strip():
+                    _mt_str = ns_meal_times_str or ""
+                    if _mt_str.strip():
                         try:
-                            _meal_times = [int(h.strip()) for h in ns_meal_times_str.split(",")]
+                            _meal_times = [int(h.strip()) for h in _mt_str.split(",")]
                         except ValueError:
-                            pass
+                            st.warning(f"Could not parse meal times: '{_mt_str}'. Using auto-detect.")
                     with contextlib.redirect_stdout(log_buffer):
                         profile_dict = ns_build_profile(
                             url, days=ns_days, token=token, output_path=save_path,
