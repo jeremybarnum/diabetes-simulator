@@ -60,19 +60,18 @@ def _clock_to_minutes(clock_str: str) -> int:
 def save_profile_to_json(file_path: str):
     """Save the current session state to a patient profile JSON file."""
     profile = build_profile_from_state()
+    def _meal_to_dict(m):
+        d = {"time_of_day_minutes": m.time_of_day_minutes,
+             "carbs_mean": m.carbs_mean, "carbs_sd": m.carbs_sd,
+             "absorption_hrs": m.absorption_hrs,
+             "declared": m.declared}
+        if m.carb_count_sigma is not None:
+            d["carb_count_sigma"] = m.carb_count_sigma
+        return d
+
     data = {
-        "meals": [
-            {"time_of_day_minutes": m.time_of_day_minutes,
-             "carbs_mean": m.carbs_mean, "carbs_sd": m.carbs_sd,
-             "absorption_hrs": m.absorption_hrs}
-            for m in profile.meals
-        ],
-        "undeclared_meals": [
-            {"time_of_day_minutes": m.time_of_day_minutes,
-             "carbs_mean": m.carbs_mean, "carbs_sd": m.carbs_sd,
-             "absorption_hrs": m.absorption_hrs}
-            for m in profile.undeclared_meals
-        ],
+        "meals": [_meal_to_dict(m) for m in profile.meals],
+        "undeclared_meals": [_meal_to_dict(m) for m in profile.undeclared_meals],
         "carb_count_sigma": profile.carb_count_sigma,
         "carb_count_bias": profile.carb_count_bias,
         "absorption_sigma": profile.absorption_sigma,
@@ -121,33 +120,29 @@ def load_profile_to_state(profile_path: str):
     profile = PatientProfile.from_json(profile_path)
     settings = profile.get_settings()
 
-    # Meals as DataFrames for data_editor (sorted chronologically)
-    st.session_state["meals_df"] = pd.DataFrame(
-        sorted([
-            {
-                "Time": _minutes_to_clock(m.time_of_day_minutes),
-                "Avg Carbs (g)": float(m.carbs_mean),
-                "SD (g)": float(m.carbs_sd),
-                "Absorption (hrs)": float(m.absorption_hrs),
-            }
-            for m in profile.meals
-        ], key=lambda r: r["Time"])
-    ) if profile.meals else pd.DataFrame(
-        columns=["Time", "Avg Carbs (g)", "SD (g)", "Absorption (hrs)"]
-    )
-
-    st.session_state["undeclared_meals_df"] = pd.DataFrame(
-        sorted([
-            {
-                "Time": _minutes_to_clock(m.time_of_day_minutes),
-                "Avg Carbs (g)": float(m.carbs_mean),
-                "SD (g)": float(m.carbs_sd),
-                "Absorption (hrs)": float(m.absorption_hrs),
-            }
-            for m in profile.undeclared_meals
-        ], key=lambda r: r["Time"])
-    ) if profile.undeclared_meals else pd.DataFrame(
-        columns=["Time", "Avg Carbs (g)", "SD (g)", "Absorption (hrs)"]
+    # Meals as single DataFrame (merging declared + undeclared)
+    all_meal_rows = []
+    for m in profile.meals:
+        all_meal_rows.append({
+            "Time": _minutes_to_clock(m.time_of_day_minutes),
+            "Avg Carbs (g)": float(m.carbs_mean),
+            "SD (g)": float(m.carbs_sd),
+            "Absorption (hrs)": float(m.absorption_hrs),
+            "Declared": m.declared,
+            "Count Error σ": float(m.carb_count_sigma) if m.carb_count_sigma is not None else None,
+        })
+    for m in profile.undeclared_meals:
+        all_meal_rows.append({
+            "Time": _minutes_to_clock(m.time_of_day_minutes),
+            "Avg Carbs (g)": float(m.carbs_mean),
+            "SD (g)": float(m.carbs_sd),
+            "Absorption (hrs)": float(m.absorption_hrs),
+            "Declared": False,
+            "Count Error σ": None,
+        })
+    all_meal_rows.sort(key=lambda r: r["Time"])
+    st.session_state["meals_df"] = pd.DataFrame(all_meal_rows) if all_meal_rows else pd.DataFrame(
+        columns=["Time", "Avg Carbs (g)", "SD (g)", "Absorption (hrs)", "Declared", "Count Error σ"]
     )
 
     # Patient model sliders — keys match the widget key= params
@@ -213,32 +208,27 @@ def build_profile_from_state() -> PatientProfile:
     """Construct a PatientProfile from current session state (widget keys)."""
     # Parse meals from data_editor results
     meals = []
+    undeclared_meals = []
     meals_df = st.session_state.get("meals_df")
     if meals_df is not None and len(meals_df) > 0:
         for _, row in meals_df.iterrows():
             try:
                 t_min = _clock_to_minutes(str(row["Time"]))
-                meals.append(MealSpec(
+                declared = bool(row.get("Declared", True))
+                count_sigma_val = row.get("Count Error σ")
+                count_sigma = float(count_sigma_val) if pd.notna(count_sigma_val) else None
+                spec = MealSpec(
                     time_of_day_minutes=t_min,
                     carbs_mean=float(row["Avg Carbs (g)"]),
                     carbs_sd=float(row["SD (g)"]),
                     absorption_hrs=float(row["Absorption (hrs)"]),
-                ))
-            except (ValueError, KeyError):
-                continue
-
-    undeclared_meals = []
-    und_df = st.session_state.get("undeclared_meals_df")
-    if und_df is not None and len(und_df) > 0:
-        for _, row in und_df.iterrows():
-            try:
-                t_min = _clock_to_minutes(str(row["Time"]))
-                undeclared_meals.append(MealSpec(
-                    time_of_day_minutes=t_min,
-                    carbs_mean=float(row["Avg Carbs (g)"]),
-                    carbs_sd=float(row["SD (g)"]),
-                    absorption_hrs=float(row["Absorption (hrs)"]),
-                ))
+                    declared=declared,
+                    carb_count_sigma=count_sigma,
+                )
+                if declared:
+                    meals.append(spec)
+                else:
+                    undeclared_meals.append(spec)
             except (ValueError, KeyError):
                 continue
 
@@ -571,10 +561,10 @@ with tab_patient:
                "Use **Load Profile** in the sidebar to reset from a preset.")
     st.subheader("Meal Schedule")
     st.caption("Times are in 24h clock format (HH:MM). Day starts at 07:00. "
-               "Declared meals are entered into the pump (with carb-counting error applied). "
-               "Undeclared meals are eaten but never bolused for.")
+               "**Declared** meals are entered into the pump (with carb-counting error applied). "
+               "Undeclared meals are eaten but never bolused for. "
+               "**Count Error σ** overrides the global carb counting sigma for that meal (blank = use global).")
 
-    st.markdown("**Declared Meals**")
     edited_meals = st.data_editor(
         st.session_state["meals_df"],
         num_rows="dynamic",
@@ -589,28 +579,14 @@ with tab_patient:
                 "SD (g)", min_value=0, max_value=50, step=1),
             "Absorption (hrs)": st.column_config.NumberColumn(
                 "Absorption (hrs)", min_value=0.5, max_value=8.0, step=0.5),
+            "Declared": st.column_config.CheckboxColumn(
+                "Declared", help="If unchecked, meal is eaten but never entered into the pump", default=True),
+            "Count Error σ": st.column_config.NumberColumn(
+                "Count Error σ", min_value=0.0, max_value=1.0, step=0.05,
+                help="Per-meal carb counting error sigma. Blank = use global value."),
         },
     )
     st.session_state["meals_df"] = edited_meals.sort_values("Time").reset_index(drop=True)
-
-    st.markdown("**Undeclared Meals** (always eaten, never bolused)")
-    edited_undeclared = st.data_editor(
-        st.session_state["undeclared_meals_df"],
-        num_rows="dynamic",
-        use_container_width=True,
-        key="undeclared_meals_editor",
-        column_config={
-            "Time": st.column_config.TextColumn(
-                "Time (HH:MM)", help="24h clock time"),
-            "Avg Carbs (g)": st.column_config.NumberColumn(
-                "Avg Carbs (g)", min_value=0, max_value=200, step=1),
-            "SD (g)": st.column_config.NumberColumn(
-                "SD (g)", min_value=0, max_value=50, step=1),
-            "Absorption (hrs)": st.column_config.NumberColumn(
-                "Absorption (hrs)", min_value=0.5, max_value=8.0, step=0.5),
-        },
-    )
-    st.session_state["undeclared_meals_df"] = edited_undeclared.sort_values("Time").reset_index(drop=True)
 
     st.divider()
 
@@ -802,13 +778,16 @@ with tab_patient:
     with st.expander("Export Profile JSON"):
         if st.button("Show profile JSON"):
             profile = build_profile_from_state()
+            def _meal_export(m):
+                d = {"time_of_day_minutes": m.time_of_day_minutes,
+                     "carbs_mean": m.carbs_mean, "carbs_sd": m.carbs_sd,
+                     "absorption_hrs": m.absorption_hrs, "declared": m.declared}
+                if m.carb_count_sigma is not None:
+                    d["carb_count_sigma"] = m.carb_count_sigma
+                return d
             export_data = {
-                "meals": [{"time_of_day_minutes": m.time_of_day_minutes,
-                           "carbs_mean": m.carbs_mean, "carbs_sd": m.carbs_sd,
-                           "absorption_hrs": m.absorption_hrs} for m in profile.meals],
-                "undeclared_meals": [{"time_of_day_minutes": m.time_of_day_minutes,
-                                     "carbs_mean": m.carbs_mean, "carbs_sd": m.carbs_sd,
-                                     "absorption_hrs": m.absorption_hrs} for m in profile.undeclared_meals],
+                "meals": [_meal_export(m) for m in profile.meals],
+                "undeclared_meals": [_meal_export(m) for m in profile.undeclared_meals],
                 "carb_count_sigma": profile.carb_count_sigma,
                 "carb_count_bias": profile.carb_count_bias,
                 "absorption_sigma": profile.absorption_sigma,

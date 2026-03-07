@@ -40,6 +40,8 @@ class MealSpec:
     carbs_mean: float          # Mean actual carbs (grams)
     carbs_sd: float            # SD of actual carbs (grams)
     absorption_hrs: float = 3.0  # True mean absorption time (hours)
+    declared: bool = True        # Whether patient declares this meal to the pump
+    carb_count_sigma: Optional[float] = None  # Per-meal counting error (None = use global)
 
 
 @dataclass
@@ -99,7 +101,9 @@ class PatientProfile:
         with open(path) as f:
             data = json.load(f)
 
-        meals = [MealSpec(**m) for m in data.get('meals', [])]
+        meals = [MealSpec(**{k: v for k, v in m.items()
+                           if k in MealSpec.__dataclass_fields__})
+                 for m in data.get('meals', [])]
         exercise_spec = None
         if 'exercise_spec' in data:
             exercise_spec = ExerciseSpec(**data['exercise_spec'])
@@ -110,7 +114,13 @@ class PatientProfile:
             with open(settings_path) as f:
                 settings = json.load(f)
 
-        undeclared_meals = [MealSpec(**m) for m in data.get('undeclared_meals', [])]
+        # Backward compat: merge old undeclared_meals into meals with declared=False
+        undeclared_meals = []
+        for m in data.get('undeclared_meals', []):
+            spec = MealSpec(**{k: v for k, v in m.items()
+                              if k in MealSpec.__dataclass_fields__})
+            spec.declared = False
+            undeclared_meals.append(spec)
 
         return cls(
             meals=meals,
@@ -666,32 +676,34 @@ class SimulationRun:
     def _generate_meals(self) -> List[MealEvent]:
         """Generate all meal events for the full simulation.
 
-        Handles:
-        - Normal declared meals (with optional bias and random error)
-        - Undeclared probability: any meal may randomly go undeclared
-        - Undeclared-only meals: always eaten, never declared (e.g., morning coffee)
+        Each MealSpec has a `declared` flag and optional per-meal `carb_count_sigma`.
+        For backward compat, undeclared_meals are also included (always undeclared).
+        The global `undeclared_meal_prob` can randomly make any declared meal undeclared.
         """
         meals = []
-        bias = self.profile.carb_count_bias
-        sigma = self.profile.carb_count_sigma
+        global_bias = self.profile.carb_count_bias
+        global_sigma = self.profile.carb_count_sigma
         abs_sigma = self.profile.absorption_sigma
+
+        # Combine declared and undeclared meal specs into one list
+        all_specs = list(self.profile.meals) + list(self.profile.undeclared_meals)
 
         for day in range(self.n_days):
             day_offset = self.t0_min + day * 1440
 
-            # --- Regular meals (may be declared or randomly undeclared) ---
-            for spec in self.profile.meals:
+            for spec in all_specs:
                 meal_time = day_offset + spec.time_of_day_minutes
 
                 # Draw actual carbs (normal distribution, clamp > 0)
                 actual_g = max(2.0, self.rng.normal(spec.carbs_mean, spec.carbs_sd))
                 actual_abs = spec.absorption_hrs
 
-                # Check if this meal goes undeclared
-                undeclared = (self.profile.undeclared_meal_prob > 0 and
-                              self.rng.random() < self.profile.undeclared_meal_prob)
+                # Determine if undeclared: spec.declared=False, or random undeclared
+                is_undeclared = not spec.declared
+                if not is_undeclared and self.profile.undeclared_meal_prob > 0:
+                    is_undeclared = self.rng.random() < self.profile.undeclared_meal_prob
 
-                if undeclared:
+                if is_undeclared:
                     meals.append(MealEvent(
                         time_minutes=meal_time,
                         actual_carbs=actual_g,
@@ -701,9 +713,11 @@ class SimulationRun:
                         undeclared=True,
                     ))
                 else:
+                    # Use per-meal sigma if set, otherwise global
+                    sigma = spec.carb_count_sigma if spec.carb_count_sigma is not None else global_sigma
+                    bias = global_bias
+
                     # Patient estimates carb count with bias + random error
-                    # declared = actual * exp(N(-bias, sigma))
-                    # bias > 0 means systematic under-declaration
                     if sigma > 0 or bias > 0:
                         count_error = float(np.exp(
                             self.rng.normal(-bias, max(sigma, 0.001))))
@@ -727,21 +741,6 @@ class SimulationRun:
                         declared_absorption_hrs=declared_abs,
                         undeclared=False,
                     ))
-
-            # --- Undeclared-only meals (always eaten, never declared) ---
-            for spec in self.profile.undeclared_meals:
-                meal_time = day_offset + spec.time_of_day_minutes
-                actual_g = max(2.0, self.rng.normal(spec.carbs_mean, spec.carbs_sd))
-                actual_abs = spec.absorption_hrs
-
-                meals.append(MealEvent(
-                    time_minutes=meal_time,
-                    actual_carbs=actual_g,
-                    actual_absorption_hrs=actual_abs,
-                    declared_carbs=0.0,
-                    declared_absorption_hrs=actual_abs,
-                    undeclared=True,
-                ))
 
         return meals
 
