@@ -368,6 +368,10 @@ with st.sidebar.expander("Advanced"):
         help="Default 7 (one full week). Reduce for faster debugging runs.",
     )
 
+run_button = st.sidebar.button("Run Simulation", type="primary", use_container_width=True)
+
+st.sidebar.divider()
+st.sidebar.subheader("Display Options")
 selected_ns_ref = st.sidebar.selectbox(
     "NS Reference Overlay",
     list(ns_ref_names.keys()),
@@ -382,8 +386,6 @@ trace_day_filter = st.sidebar.radio(
     horizontal=True,
     help="Filter both sim traces and NS overlay by exercise vs rest days.",
 )
-
-run_button = st.sidebar.button("Run Simulation", type="primary", use_container_width=True)
 
 
 # ─── Helper functions ────────────────────────────────────────────────────────
