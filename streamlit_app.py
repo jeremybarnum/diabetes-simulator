@@ -1295,106 +1295,123 @@ with tab_results:
             # Assign colors
             variant_colors = get_variant_colors(variant_labels)
 
-            # Load NS reference trace if selected
-            _ns_ref_trace = None
-            _ns_ref_stats = None
-            if ns_ref_path:
+            # Cache results in session state so trace toggle can redraw without rerun
+            st.session_state["_sim_traces"] = traces_by_variant
+            st.session_state["_sim_metrics"] = metrics_by_variant
+            st.session_state["_sim_variant_labels"] = variant_labels
+            st.session_state["_sim_variant_colors"] = variant_colors
+            st.session_state["_sim_n_paths"] = n_paths
+            st.session_state["_sim_n_days"] = n_days
+
+    # --- Display results (from session state, updates on trace toggle change) ---
+    if "_sim_traces" in st.session_state:
+        traces_by_variant = st.session_state["_sim_traces"]
+        metrics_by_variant = st.session_state["_sim_metrics"]
+        variant_labels = st.session_state["_sim_variant_labels"]
+        variant_colors = st.session_state["_sim_variant_colors"]
+        n_paths = st.session_state["_sim_n_paths"]
+        n_days = st.session_state["_sim_n_days"]
+
+        # Load NS reference trace (re-evaluated on every render, so toggle changes take effect)
+        _ns_ref_trace = None
+        _ns_ref_stats = None
+        if ns_ref_path:
+            try:
+                with open(ns_ref_path) as _f:
+                    _ns_ref_data = json.load(_f)
+                _trace_key = {
+                    "All days": "median_trace",
+                    "Rest days": "median_trace_rest",
+                    "Exercise days": "median_trace_exercise",
+                }.get(ns_ref_trace_type, "median_trace")
+                _raw_trace = _ns_ref_data.get(_trace_key) or _ns_ref_data.get("median_trace", [])
+                _ns_ref_trace = [tuple(p) for p in _raw_trace]
+                _ns_ref_stats = _ns_ref_data
+            except Exception:
+                pass
+
+        # Spaghetti plot
+        st.subheader("BG Traces")
+        _ref_label = f"NS {ns_ref_trace_type}" if ns_ref_path else "NS Reference"
+        fig = plot_spaghetti(traces_by_variant, variant_colors, n_paths, n_days,
+                             ns_ref_trace=_ns_ref_trace, ns_ref_label=_ref_label)
+        st.pyplot(fig)
+        plt.close(fig)
+
+        # Summary stats table
+        st.subheader("Summary Statistics")
+
+        # Use sidebar-selected NS reference, or fall back to profile-embedded stats
+        ref_stats = _ns_ref_stats
+        if not ref_stats:
+            profile_path_loaded = st.session_state.get("loaded_profile", "")
+            if profile_path_loaded:
                 try:
-                    with open(ns_ref_path) as _f:
-                        _ns_ref_data = json.load(_f)
-                    _trace_key = {
-                        "All days": "median_trace",
-                        "Rest days": "median_trace_rest",
-                        "Exercise days": "median_trace_exercise",
-                    }.get(ns_ref_trace_type, "median_trace")
-                    _raw_trace = _ns_ref_data.get(_trace_key) or _ns_ref_data.get("median_trace", [])
-                    _ns_ref_trace = [tuple(p) for p in _raw_trace]
-                    _ns_ref_stats = _ns_ref_data
+                    with open(profile_path_loaded) as _f:
+                        _pdata = json.load(_f)
+                    ref_stats = _pdata.get("ns_reference_stats")
                 except Exception:
                     pass
 
-            # Spaghetti plot
-            st.subheader("BG Traces")
-            _ref_label = f"NS {ns_ref_trace_type}" if ns_ref_path else "NS Reference"
-            fig = plot_spaghetti(traces_by_variant, variant_colors, n_paths, n_days,
-                                 ns_ref_trace=_ns_ref_trace, ns_ref_label=_ref_label)
-            st.pyplot(fig)
-            plt.close(fig)
+        n_cols = len(variant_labels) + (1 if ref_stats else 0)
+        cols = st.columns(n_cols)
+        col_idx = 0
 
-            # Summary stats table
-            st.subheader("Summary Statistics")
+        if ref_stats:
+            with cols[col_idx]:
+                st.markdown(f"**NS Reference**")
+                st.caption(f"{ref_stats.get('start_date', '?')} to {ref_stats.get('end_date', '?')}")
+                ref_display = {
+                    "Mean BG (mg/dL)": f"{ref_stats.get('mean_bg', '?')}",
+                    "SD BG (mg/dL)": f"{ref_stats.get('sd_bg', '?')}",
+                    "TIR 70-180 (%)": f"{ref_stats.get('tir', '?')}",
+                    "Time <70 (%)": f"{ref_stats.get('time_below_70', '?')}",
+                    "Time <54 (%)": f"{ref_stats.get('time_below_54', '?')}",
+                    "Time >180 (%)": f"{ref_stats.get('time_above_180', '?')}",
+                    "Time >250 (%)": f"{ref_stats.get('time_above_250', '?')}",
+                    "GMI (%)": f"{ref_stats.get('gmi', '?')}",
+                }
+                for metric, value in ref_display.items():
+                    st.metric(metric, value)
+            col_idx += 1
 
-            # Use sidebar-selected NS reference, or fall back to profile-embedded stats
-            ref_stats = _ns_ref_stats
-            if not ref_stats:
-                profile_path_loaded = st.session_state.get("loaded_profile", "")
-                if profile_path_loaded:
-                    try:
-                        with open(profile_path_loaded) as _f:
-                            _pdata = json.load(_f)
-                        ref_stats = _pdata.get("ns_reference_stats")
-                    except Exception:
-                        pass
+        for vlabel in variant_labels:
+            with cols[col_idx]:
+                display = _variant_display_name(vlabel)
+                st.markdown(f"**{display}**")
+                stats = compute_summary_stats(metrics_by_variant[vlabel])
+                for metric, value in stats.items():
+                    st.metric(metric, value)
+            col_idx += 1
 
-            n_cols = len(variant_labels) + (1 if ref_stats else 0)
-            cols = st.columns(n_cols)
-            col_idx = 0
+        # Head-to-head (if exactly 2 variants)
+        if len(variant_labels) == 2:
+            st.subheader("Head-to-Head")
+            a, b = variant_labels
+            ma = metrics_by_variant[a]
+            mb = metrics_by_variant[b]
+            n = min(len(ma), len(mb))
 
-            if ref_stats:
-                with cols[col_idx]:
-                    st.markdown(f"**NS Reference**")
-                    st.caption(f"{ref_stats.get('start_date', '?')} to {ref_stats.get('end_date', '?')}")
-                    ref_display = {
-                        "Mean BG (mg/dL)": f"{ref_stats.get('mean_bg', '?')}",
-                        "SD BG (mg/dL)": f"{ref_stats.get('sd_bg', '?')}",
-                        "TIR 70-180 (%)": f"{ref_stats.get('tir', '?')}",
-                        "Time <70 (%)": f"{ref_stats.get('time_below_70', '?')}",
-                        "Time <54 (%)": f"{ref_stats.get('time_below_54', '?')}",
-                        "Time >180 (%)": f"{ref_stats.get('time_above_180', '?')}",
-                        "Time >250 (%)": f"{ref_stats.get('time_above_250', '?')}",
-                        "GMI (%)": f"{ref_stats.get('gmi', '?')}",
-                    }
-                    for metric, value in ref_display.items():
-                        st.metric(metric, value)
-                col_idx += 1
+            tir_a_wins = sum(1 for x, y in zip(ma[:n], mb[:n])
+                             if x.time_in_range > y.time_in_range)
+            tir_b_wins = sum(1 for x, y in zip(ma[:n], mb[:n])
+                             if y.time_in_range > x.time_in_range)
+            hypo_a_wins = sum(1 for x, y in zip(ma[:n], mb[:n])
+                              if x.time_below_70 < y.time_below_70)
+            hypo_b_wins = sum(1 for x, y in zip(ma[:n], mb[:n])
+                              if y.time_below_70 < x.time_below_70)
 
-            for vlabel in variant_labels:
-                with cols[col_idx]:
-                    display = _variant_display_name(vlabel)
-                    st.markdown(f"**{display}**")
-                    stats = compute_summary_stats(metrics_by_variant[vlabel])
-                    for metric, value in stats.items():
-                        st.metric(metric, value)
-                col_idx += 1
-
-            # Head-to-head (if exactly 2 variants)
-            if len(variant_labels) == 2:
-                st.subheader("Head-to-Head")
-                a, b = variant_labels
-                ma = metrics_by_variant[a]
-                mb = metrics_by_variant[b]
-                n = min(len(ma), len(mb))
-
-                tir_a_wins = sum(1 for x, y in zip(ma[:n], mb[:n])
-                                 if x.time_in_range > y.time_in_range)
-                tir_b_wins = sum(1 for x, y in zip(ma[:n], mb[:n])
-                                 if y.time_in_range > x.time_in_range)
-                hypo_a_wins = sum(1 for x, y in zip(ma[:n], mb[:n])
-                                  if x.time_below_70 < y.time_below_70)
-                hypo_b_wins = sum(1 for x, y in zip(ma[:n], mb[:n])
-                                  if y.time_below_70 < x.time_below_70)
-
-                a_label = _variant_display_name(a)
-                b_label = _variant_display_name(b)
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.markdown(f"**Higher TIR**: {a_label} wins {tir_a_wins}, "
-                                f"{b_label} wins {tir_b_wins}, "
-                                f"tied {n - tir_a_wins - tir_b_wins}")
-                with col2:
-                    st.markdown(f"**Less hypo**: {a_label} wins {hypo_a_wins}, "
-                                f"{b_label} wins {hypo_b_wins}, "
-                                f"tied {n - hypo_a_wins - hypo_b_wins}")
+            a_label = _variant_display_name(a)
+            b_label = _variant_display_name(b)
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown(f"**Higher TIR**: {a_label} wins {tir_a_wins}, "
+                            f"{b_label} wins {tir_b_wins}, "
+                            f"tied {n - tir_a_wins - tir_b_wins}")
+            with col2:
+                st.markdown(f"**Less hypo**: {a_label} wins {hypo_a_wins}, "
+                            f"{b_label} wins {hypo_b_wins}, "
+                            f"tied {n - hypo_a_wins - hypo_b_wins}")
 
     else:
         st.info("Configure settings in the sidebar and the tabs below, "
