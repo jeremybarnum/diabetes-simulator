@@ -323,11 +323,15 @@ def extract_meal_pattern(
     treatments: List[dict],
     tz: ZoneInfo,
     n_days: int,
+    meal_times: Optional[List[int]] = None,
 ) -> List[dict]:
     """Extract meal schedule from carb treatments.
 
-    Groups carb entries by hour, merges adjacent active hours into meal slots,
-    and returns MealSpec-compatible dicts.
+    If meal_times is provided (list of clock hours, e.g. [8, 13, 19]),
+    carb entries are bucketed to the nearest specified meal time.
+    Otherwise, auto-detects meal slots by grouping active hours.
+
+    Returns MealSpec-compatible dicts.
     """
     print(f"\n{'='*70}")
     print("Step 2: Meal Patterns from Carb Treatments")
@@ -385,7 +389,7 @@ def extract_meal_pattern(
     if not carb_entries:
         return []
 
-    # Bucket by hour
+    # Hourly distribution (always printed for reference)
     hourly = defaultdict(list)
     for e in carb_entries:
         hourly[e["hour"]].append(e["carbs"])
@@ -401,19 +405,117 @@ def extract_meal_pattern(
             print(f"  {h:02d}:00    {len(vals):>6} {per_day:>8.2f} "
                   f"{np.mean(arr):>8.1f} {np.std(arr):>8.1f}")
 
-    # Merge adjacent active hours into meal slots
-    # An hour is "active" if it has >= 0.3 entries/day
+    if meal_times:
+        # --- User-specified meal times: bucket each entry to nearest meal ---
+        return _bucket_to_meal_times(carb_entries, meal_times, n_days)
+    else:
+        # --- Auto-detect: merge adjacent active hours into slots ---
+        return _auto_detect_meal_slots(carb_entries, hourly, n_days)
+
+
+def _bucket_to_meal_times(
+    carb_entries: List[dict],
+    meal_times: List[int],
+    n_days: int,
+) -> List[dict]:
+    """Bucket carb entries to user-specified meal times (clock hours).
+
+    Each carb entry is assigned to the nearest meal time. Daily totals per
+    bucket are computed, then mean/sd across days.
+    """
+    meal_times = sorted(meal_times)
+    print(f"\n  User-specified meal times: {', '.join(f'{h:02d}:00' for h in meal_times)}")
+
+    def nearest_meal(clock_hour: int, clock_min: int) -> int:
+        """Return the meal_time index nearest to this clock time."""
+        entry_min = clock_hour * 60 + clock_min
+        best_idx = 0
+        best_dist = 1440
+        for i, mh in enumerate(meal_times):
+            meal_min = mh * 60
+            # Handle wrap-around (e.g., 23:00 is close to 00:00 meal)
+            dist = min(abs(entry_min - meal_min), 1440 - abs(entry_min - meal_min))
+            if dist < best_dist:
+                best_dist = dist
+                best_idx = i
+        return best_idx
+
+    # Bucket entries by (date, meal_index) → sum of carbs for that meal on that day
+    daily_meal_carbs = defaultdict(lambda: defaultdict(float))
+    daily_meal_absorption = defaultdict(lambda: defaultdict(list))
+    bucket_all_carbs = defaultdict(list)  # all individual entries per bucket
+
+    for e in carb_entries:
+        idx = nearest_meal(e["hour"], e["local_dt"].minute)
+        day = e["local_dt"].date().isoformat()
+        daily_meal_carbs[day][idx] += e["carbs"]
+        bucket_all_carbs[idx].append(e["carbs"])
+        if e["absorption_hrs"] is not None:
+            daily_meal_absorption[day][idx].append(e["absorption_hrs"])
+
+    # Compute per-meal stats from daily totals
+    meal_specs = []
+    print(f"\n  Meal buckets:")
+    for i, mh in enumerate(meal_times):
+        # Collect daily totals for this meal (including 0 for days with no entry)
+        all_days = sorted(set(e["local_dt"].date().isoformat() for e in carb_entries))
+        daily_totals = [daily_meal_carbs[day].get(i, 0.0) for day in all_days]
+        # Only include days where this meal had carbs (don't count skipped meals as 0g)
+        nonzero_totals = [t for t in daily_totals if t > 0]
+
+        if not nonzero_totals:
+            print(f"    {mh:02d}:00 → no carb entries")
+            continue
+
+        arr = np.array(nonzero_totals)
+        n_entries = len(bucket_all_carbs[i])
+        skip_rate = 1.0 - len(nonzero_totals) / len(all_days)
+
+        # Absorption: median from Loop metadata if available
+        all_abs = []
+        for day_abs in daily_meal_absorption.values():
+            all_abs.extend(day_abs.get(i, []))
+        if all_abs:
+            absorption_hrs = round(float(np.median(all_abs)), 1)
+            abs_source = f"Loop median of {len(all_abs)}"
+        else:
+            absorption_hrs = 3.0
+            abs_source = "default"
+
+        # Convert clock hour to sim time (minutes from 7am)
+        time_of_day_minutes = (mh * 60 - 7 * 60) % 1440
+
+        spec = {
+            "time_of_day_minutes": time_of_day_minutes,
+            "carbs_mean": round(float(np.mean(arr)), 1),
+            "carbs_sd": round(float(np.std(arr)), 1) if len(arr) > 1 else round(float(np.mean(arr)) * 0.3, 1),
+            "absorption_hrs": absorption_hrs,
+        }
+        meal_specs.append(spec)
+
+        print(f"    {mh:02d}:00 → sim t={spec['time_of_day_minutes']}min, "
+              f"mean={spec['carbs_mean']}g, sd={spec['carbs_sd']}g, "
+              f"abs={absorption_hrs}h ({abs_source}), "
+              f"{len(nonzero_totals)}/{len(all_days)} days ({n_entries} entries), "
+              f"skip={skip_rate:.0%}")
+
+    return meal_specs
+
+
+def _auto_detect_meal_slots(
+    carb_entries: List[dict],
+    hourly: Dict[int, List[float]],
+    n_days: int,
+) -> List[dict]:
+    """Auto-detect meal slots by merging adjacent active hours."""
     min_freq = 0.3
     active_hours = sorted(h for h in range(24) if len(hourly[h]) / n_days >= min_freq)
 
     if not active_hours:
-        # Fallback: lower threshold
         min_freq = 0.1
         active_hours = sorted(h for h in range(24) if len(hourly[h]) / n_days >= min_freq)
 
-    # Group consecutive hours into slots, but break slots wider than max_slot_hours
-    # This prevents jamming a full-day grazing pattern into 3 mega-slots
-    max_slot_hours = 2  # Max 2 consecutive hours per slot
+    max_slot_hours = 2
     slots = []
     if active_hours:
         current_slot = [active_hours[0]]
@@ -425,14 +527,12 @@ def extract_meal_pattern(
                 current_slot = [h]
         slots.append(current_slot)
 
-    # Convert slots to MealSpecs
     meal_specs = []
-    print(f"\n  Detected meal slots:")
+    print(f"\n  Auto-detected meal slots:")
     for slot_hours in slots:
-        # Gather all carb values in this slot
         slot_carbs = []
-        slot_times_min = []  # minutes from midnight
-        slot_absorption_hrs = []  # from Loop-era metadata
+        slot_times_min = []
+        slot_absorption_hrs = []
         for e in carb_entries:
             if e["hour"] in slot_hours:
                 slot_carbs.append(e["carbs"])
@@ -445,11 +545,8 @@ def extract_meal_pattern(
 
         arr = np.array(slot_carbs)
         mean_time_min = int(np.mean(slot_times_min))
-
-        # Convert clock time to simulator time (minutes from 7am)
         time_of_day_minutes = (mean_time_min - 7 * 60) % 1440
 
-        # Use Loop-era absorption times if available, otherwise default 3.0h
         if slot_absorption_hrs:
             absorption_hrs = round(float(np.median(slot_absorption_hrs)), 1)
             abs_source = f"Loop median of {len(slot_absorption_hrs)}"
@@ -639,12 +736,14 @@ def build_profile(
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
     insulin_type: str = DEFAULT_INSULIN_TYPE,
+    meal_times: Optional[List[int]] = None,
 ) -> dict:
     """Full pipeline: fetch NS data → extract patterns → build PatientProfile dict.
 
     Date range: if start_date/end_date are provided, they take precedence over days.
     If only one is provided, the other is inferred from days.
     insulin_type: one of INSULIN_TYPES keys (novolog, humalog, fiasp, lyumjev).
+    meal_times: optional list of clock hours (e.g. [8, 13, 19]) to bucket carbs into.
     """
 
     if start_date and end_date:
@@ -719,7 +818,7 @@ def build_profile(
     print(f"  Data source: {data_source} (Loop={loop_count}, Trio={trio_count})")
 
     # --- Step 2: Meal patterns ---
-    meal_specs = extract_meal_pattern(all_treatments, tz, days)
+    meal_specs = extract_meal_pattern(all_treatments, tz, days, meal_times=meal_times)
 
     # --- Step 3: Exercise ---
     exercises_per_week, exercise_spec = extract_exercise_pattern(all_treatments, tz, days)
@@ -1530,6 +1629,9 @@ def main():
     parser.add_argument("--insulin-type", type=str, default=DEFAULT_INSULIN_TYPE,
                         choices=list(INSULIN_TYPES.keys()),
                         help=f"Insulin type for activity curve (default {DEFAULT_INSULIN_TYPE})")
+    parser.add_argument("--meal-times", type=str, default=None,
+                        help="Comma-separated clock hours for meal times (e.g. '8,13,19'). "
+                             "Carb entries are bucketed to nearest meal. Omit for auto-detect.")
     args = parser.parse_args()
 
     start_dt = None
@@ -1538,6 +1640,10 @@ def main():
         start_dt = datetime.strptime(args.start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     if args.end_date:
         end_dt = datetime.strptime(args.end_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+
+    meal_times_list = None
+    if args.meal_times:
+        meal_times_list = [int(h.strip()) for h in args.meal_times.split(",")]
 
     build_profile(
         url=args.url,
@@ -1548,6 +1654,7 @@ def main():
         start_date=start_dt,
         end_date=end_dt,
         insulin_type=args.insulin_type,
+        meal_times=meal_times_list,
     )
 
 

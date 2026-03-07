@@ -976,6 +976,12 @@ with tab_ns:
             key="ns_insulin_type",
             help="Determines the insulin activity curve used for deviation analysis"
         )
+        ns_meal_times_str = st.text_input(
+            "Meal times (clock hours)", value="",
+            key="ns_meal_times",
+            placeholder="e.g. 8, 13, 19",
+            help="Comma-separated clock hours. Carb entries are bucketed to the nearest meal. Leave blank for auto-detect."
+        )
 
     import_button = st.button("Import from Nightscout", type="primary")
 
@@ -999,11 +1005,18 @@ with tab_ns:
                               if ns_start_date else None)
                     _end = (datetime.combine(ns_end_date, datetime.min.time()).replace(tzinfo=_tz.utc)
                             if ns_end_date else None)
+                    _meal_times = None
+                    if ns_meal_times_str.strip():
+                        try:
+                            _meal_times = [int(h.strip()) for h in ns_meal_times_str.split(",")]
+                        except ValueError:
+                            pass
                     with contextlib.redirect_stdout(log_buffer):
                         profile_dict = ns_build_profile(
                             url, days=ns_days, token=token, output_path=save_path,
                             start_date=_start, end_date=_end,
                             insulin_type=ns_insulin_type,
+                            meal_times=_meal_times,
                         )
                 except Exception as e:
                     st.error(f"Import failed: {e}")
