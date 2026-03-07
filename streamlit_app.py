@@ -501,6 +501,7 @@ def compute_summary_stats(all_metrics):
         return {}
     return {
         "Mean BG (mg/dL)": f"{np.mean([m.mean_bg for m in all_metrics]):.1f}",
+        "SD BG (mg/dL)": f"{np.mean([m.sd_bg for m in all_metrics]):.1f}",
         "TIR 70-180 (%)": f"{np.mean([m.time_in_range for m in all_metrics]):.1f}",
         "Time <70 (%)": f"{np.mean([m.time_below_70 for m in all_metrics]):.2f}",
         "Time <54 (%)": f"{np.mean([m.time_below_54 for m in all_metrics]):.3f}",
@@ -1232,6 +1233,7 @@ with tab_results:
                     st.caption(f"{ref_stats.get('start_date', '?')} to {ref_stats.get('end_date', '?')}")
                     ref_display = {
                         "Mean BG (mg/dL)": f"{ref_stats.get('mean_bg', '?')}",
+                        "SD BG (mg/dL)": f"{ref_stats.get('sd_bg', '?')}",
                         "TIR 70-180 (%)": f"{ref_stats.get('tir', '?')}",
                         "Time <70 (%)": f"{ref_stats.get('time_below_70', '?')}",
                         "Time <54 (%)": f"{ref_stats.get('time_below_54', '?')}",
