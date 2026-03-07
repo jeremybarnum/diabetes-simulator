@@ -352,10 +352,11 @@ algorithms = [algo_options[name] for name in selected_algos]
 
 # Simulation parameters
 n_paths = st.sidebar.slider(
-    "Number of weeks", min_value=5, max_value=100, value=20, step=5,
-    help="Each path simulates one full week (Mon-Sun) with random meal sizes, "
-         "carb counting errors, and sensitivity variation. Exercise occurs on the "
-         "same days each week. More weeks = more reliable statistics.",
+    "Number of simulated weeks", min_value=5, max_value=100, value=20, step=5,
+    help="Each simulated week runs Mon-Sun with fresh random draws for meal sizes, "
+         "carb counting errors, and sensitivity. Exercise occurs on the same fixed days "
+         "each week. A larger simulation reduces the chance of spurious conclusions from "
+         "unlucky random draws.",
 )
 seed = st.sidebar.number_input(
     "Random seed", value=42, min_value=0, max_value=99999,
