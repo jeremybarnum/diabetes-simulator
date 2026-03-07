@@ -121,6 +121,7 @@ def load_profile_to_state(profile_path: str):
     settings = profile.get_settings()
 
     # Meals as single DataFrame (merging declared + undeclared)
+    global_sigma = float(profile.carb_count_sigma)
     all_meal_rows = []
     for m in profile.meals:
         all_meal_rows.append({
@@ -129,7 +130,7 @@ def load_profile_to_state(profile_path: str):
             "SD (g)": float(m.carbs_sd),
             "Absorption (hrs)": float(m.absorption_hrs),
             "Declared": m.declared,
-            "Count Error σ": float(m.carb_count_sigma) if m.carb_count_sigma is not None else None,
+            "Count Error σ": float(m.carb_count_sigma) if m.carb_count_sigma is not None else global_sigma,
         })
     for m in profile.undeclared_meals:
         all_meal_rows.append({
@@ -138,12 +139,17 @@ def load_profile_to_state(profile_path: str):
             "SD (g)": float(m.carbs_sd),
             "Absorption (hrs)": float(m.absorption_hrs),
             "Declared": False,
-            "Count Error σ": None,
+            "Count Error σ": global_sigma,
         })
     all_meal_rows.sort(key=lambda r: r["Time"])
-    st.session_state["meals_df"] = pd.DataFrame(all_meal_rows) if all_meal_rows else pd.DataFrame(
-        columns=["Time", "Avg Carbs (g)", "SD (g)", "Absorption (hrs)", "Declared", "Count Error σ"]
-    )
+    if all_meal_rows:
+        st.session_state["meals_df"] = pd.DataFrame(all_meal_rows)
+    else:
+        st.session_state["meals_df"] = pd.DataFrame(
+            {"Time": pd.Series(dtype=str), "Avg Carbs (g)": pd.Series(dtype=float),
+             "SD (g)": pd.Series(dtype=float), "Absorption (hrs)": pd.Series(dtype=float),
+             "Declared": pd.Series(dtype=bool), "Count Error σ": pd.Series(dtype=float)}
+        )
 
     # Patient model sliders — keys match the widget key= params
     st.session_state["carb_count_sigma_sl"] = float(profile.carb_count_sigma)
@@ -582,8 +588,8 @@ with tab_patient:
             "Declared": st.column_config.CheckboxColumn(
                 "Declared", help="If unchecked, meal is eaten but never entered into the pump", default=True),
             "Count Error σ": st.column_config.NumberColumn(
-                "Count Error σ", min_value=0.0, max_value=1.0, step=0.05,
-                help="Per-meal carb counting error sigma. Blank = use global value."),
+                "Count Error σ", min_value=0.0, max_value=1.0, step=0.05, default=0.15,
+                help="Per-meal carb counting error sigma."),
         },
     )
     st.session_state["meals_df"] = edited_meals.sort_values("Time").reset_index(drop=True)
