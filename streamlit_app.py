@@ -1009,7 +1009,7 @@ with tab_ns:
                     _mt_str = ns_meal_times_str or ""
                     if _mt_str.strip():
                         try:
-                            _meal_times = [int(h.strip()) for h in _mt_str.split(",")]
+                            _meal_times = [float(h.strip()) for h in _mt_str.split(",")]
                         except ValueError:
                             st.warning(f"Could not parse meal times: '{_mt_str}'. Using auto-detect.")
                     with contextlib.redirect_stdout(log_buffer):

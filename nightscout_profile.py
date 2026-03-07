@@ -323,11 +323,11 @@ def extract_meal_pattern(
     treatments: List[dict],
     tz: ZoneInfo,
     n_days: int,
-    meal_times: Optional[List[int]] = None,
+    meal_times: Optional[List[float]] = None,
 ) -> List[dict]:
     """Extract meal schedule from carb treatments.
 
-    If meal_times is provided (list of clock hours, e.g. [8, 13, 19]),
+    If meal_times is provided (list of clock hours, e.g. [8, 13, 19.5]),
     carb entries are bucketed to the nearest specified meal time.
     Otherwise, auto-detects meal slots by grouping active hours.
 
@@ -413,18 +413,25 @@ def extract_meal_pattern(
         return _auto_detect_meal_slots(carb_entries, hourly, n_days)
 
 
+def _format_clock_hour(h: float) -> str:
+    """Format a fractional clock hour as HH:MM."""
+    hours = int(h)
+    minutes = int((h - hours) * 60)
+    return f"{hours:02d}:{minutes:02d}"
+
+
 def _bucket_to_meal_times(
     carb_entries: List[dict],
-    meal_times: List[int],
+    meal_times: List[float],
     n_days: int,
 ) -> List[dict]:
-    """Bucket carb entries to user-specified meal times (clock hours).
+    """Bucket carb entries to user-specified meal times (clock hours, e.g. [8, 13, 19.5]).
 
     Each carb entry is assigned to the nearest meal time. Daily totals per
     bucket are computed, then mean/sd across days.
     """
     meal_times = sorted(meal_times)
-    print(f"\n  User-specified meal times: {', '.join(f'{h:02d}:00' for h in meal_times)}")
+    print(f"\n  User-specified meal times: {', '.join(_format_clock_hour(h) for h in meal_times)}")
 
     def nearest_meal(clock_hour: int, clock_min: int) -> int:
         """Return the meal_time index nearest to this clock time."""
@@ -432,7 +439,7 @@ def _bucket_to_meal_times(
         best_idx = 0
         best_dist = 1440
         for i, mh in enumerate(meal_times):
-            meal_min = mh * 60
+            meal_min = int(mh * 60)
             # Handle wrap-around (e.g., 23:00 is close to 00:00 meal)
             dist = min(abs(entry_min - meal_min), 1440 - abs(entry_min - meal_min))
             if dist < best_dist:
@@ -464,7 +471,7 @@ def _bucket_to_meal_times(
         nonzero_totals = [t for t in daily_totals if t > 0]
 
         if not nonzero_totals:
-            print(f"    {mh:02d}:00 → no carb entries")
+            print(f"    {_format_clock_hour(mh)} → no carb entries")
             continue
 
         arr = np.array(nonzero_totals)
@@ -483,7 +490,7 @@ def _bucket_to_meal_times(
             abs_source = "default"
 
         # Convert clock hour to sim time (minutes from 7am)
-        time_of_day_minutes = (mh * 60 - 7 * 60) % 1440
+        time_of_day_minutes = int(mh * 60 - 7 * 60) % 1440
 
         spec = {
             "time_of_day_minutes": time_of_day_minutes,
@@ -493,7 +500,7 @@ def _bucket_to_meal_times(
         }
         meal_specs.append(spec)
 
-        print(f"    {mh:02d}:00 → sim t={spec['time_of_day_minutes']}min, "
+        print(f"    {_format_clock_hour(mh)} → sim t={spec['time_of_day_minutes']}min, "
               f"mean={spec['carbs_mean']}g, sd={spec['carbs_sd']}g, "
               f"abs={absorption_hrs}h ({abs_source}), "
               f"{len(nonzero_totals)}/{len(all_days)} days ({n_entries} entries), "
@@ -736,14 +743,14 @@ def build_profile(
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
     insulin_type: str = DEFAULT_INSULIN_TYPE,
-    meal_times: Optional[List[int]] = None,
+    meal_times: Optional[List[float]] = None,
 ) -> dict:
     """Full pipeline: fetch NS data → extract patterns → build PatientProfile dict.
 
     Date range: if start_date/end_date are provided, they take precedence over days.
     If only one is provided, the other is inferred from days.
     insulin_type: one of INSULIN_TYPES keys (novolog, humalog, fiasp, lyumjev).
-    meal_times: optional list of clock hours (e.g. [8, 13, 19]) to bucket carbs into.
+    meal_times: optional list of clock hours (e.g. [8, 13, 19.5]) to bucket carbs into.
     """
 
     if start_date and end_date:
@@ -1643,7 +1650,7 @@ def main():
 
     meal_times_list = None
     if args.meal_times:
-        meal_times_list = [int(h.strip()) for h in args.meal_times.split(",")]
+        meal_times_list = [float(h.strip()) for h in args.meal_times.split(",")]
 
     build_profile(
         url=args.url,
