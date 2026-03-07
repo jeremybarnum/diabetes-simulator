@@ -1,51 +1,50 @@
 {
     "meals_rest": [
         {
-            "time_of_day_minutes": 90,
-            "carbs_mean": 12.0,
-            "carbs_sd": 4.0,
-            "absorption_hrs": 3.0
+            "time_of_day_minutes": 30,
+            "carbs_mean": 7,
+            "carbs_sd": 1,
+            "absorption_hrs": 1.0,
+            "carb_count_sigma": 0
         },
         {
-            "time_of_day_minutes": 330,
-            "carbs_mean": 15.0,
-            "carbs_sd": 5.0,
-            "absorption_hrs": 3.0
+            "time_of_day_minutes": 150,
+            "carbs_mean": 15,
+            "carbs_sd": 3,
+            "absorption_hrs": 3.0,
+            "carb_count_sigma": 0.2
         },
         {
-            "time_of_day_minutes": 690,
-            "carbs_mean": 20.0,
-            "carbs_sd": 6.0,
-            "absorption_hrs": 3.5
+            "time_of_day_minutes": 360,
+            "carbs_mean": 20,
+            "carbs_sd": 5,
+            "absorption_hrs": 3.0,
+            "carb_count_sigma": 0.35
         },
         {
-            "time_of_day_minutes": 480,
-            "carbs_mean": 5.0,
-            "carbs_sd": 3.0,
-            "absorption_hrs": 2.5
+            "time_of_day_minutes": 540,
+            "carbs_mean": 7,
+            "carbs_sd": 2,
+            "absorption_hrs": 3.0,
+            "carb_count_sigma": 0.15
         },
         {
-            "time_of_day_minutes": 570,
-            "carbs_mean": 5.0,
-            "carbs_sd": 3.0,
-            "absorption_hrs": 2.5
+            "time_of_day_minutes": 660,
+            "carbs_mean": 20,
+            "carbs_sd": 6,
+            "absorption_hrs": 3.0,
+            "carb_count_sigma": 0.35
         },
         {
-            "time_of_day_minutes": 810,
-            "carbs_mean": 5.0,
-            "carbs_sd": 3.0,
-            "absorption_hrs": 2.5
+            "time_of_day_minutes": 840,
+            "carbs_mean": 10,
+            "carbs_sd": 3,
+            "absorption_hrs": 3.0,
+            "carb_count_sigma": 0.35
         }
     ],
     "meals_exercise": [],
-    "undeclared_meals_rest": [
-        {
-            "time_of_day_minutes": 30,
-            "carbs_mean": 8.0,
-            "carbs_sd": 4.0,
-            "absorption_hrs": 2.0
-        }
-    ],
+    "undeclared_meals_rest": [],
     "undeclared_meals_exercise": [],
     "carb_count_sigma": 0.35,
     "carb_count_bias": 0.0,
