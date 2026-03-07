@@ -813,6 +813,17 @@ def build_profile(
         default_settings = json.load(f)
     merged_settings = {**default_settings, **algo_settings}
 
+    # Map user-facing insulin_type (novolog/fiasp) to internal model name
+    _insulin_type_to_model = {
+        "novolog": "rapid_acting_adult",
+        "humalog": "rapid_acting_adult",
+        "fiasp": "fiasp",
+        "lyumjev": "lyumjev",
+    }
+    merged_settings["insulin_type"] = _insulin_type_to_model.get(
+        insulin_type.lower(), "rapid_acting_adult"
+    )
+
     # --- Fetch treatments ---
     print("\nFetching treatments...")
     all_treatments = fetch_treatments(url, start_date, end_date, token=token, count=50000)
