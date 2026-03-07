@@ -352,19 +352,20 @@ algorithms = [algo_options[name] for name in selected_algos]
 
 # Simulation parameters
 n_paths = st.sidebar.slider(
-    "Number of paths", min_value=5, max_value=100, value=20, step=5,
-    help="Each path is one possible day with random meal sizes, carb counting errors, "
-         "and sensitivity variation. More paths = more reliable statistics.",
-)
-n_days = st.sidebar.slider(
-    "Days per path", min_value=1, max_value=14, value=1, step=1,
-    help="Multi-day paths let the algorithm build up history (autosens, IOB carry-over). "
-         "All days are overlaid on a single 24h plot.",
+    "Number of weeks", min_value=5, max_value=100, value=20, step=5,
+    help="Each path simulates one full week (Mon-Sun) with random meal sizes, "
+         "carb counting errors, and sensitivity variation. Exercise occurs on the "
+         "same days each week. More weeks = more reliable statistics.",
 )
 seed = st.sidebar.number_input(
     "Random seed", value=42, min_value=0, max_value=99999,
     help="Fixed seed makes results reproducible. Change it to see different random draws.",
 )
+with st.sidebar.expander("Advanced"):
+    n_days = st.slider(
+        "Days per path", min_value=1, max_value=14, value=7, step=1,
+        help="Default 7 (one full week). Reduce for faster debugging runs.",
+    )
 
 selected_ns_ref = st.sidebar.selectbox(
     "NS Reference Overlay",
@@ -536,8 +537,8 @@ def plot_spaghetti(traces_by_algo, algo_colors, n_paths, n_days,
 
     ax.set_xlabel("Time of Day")
     ax.set_ylabel("Blood Glucose (mg/dL)")
-    days_label = f" x {n_days} days" if n_days > 1 else ""
-    ax.set_title(f"24h BG Traces — {n_paths} paths{days_label}")
+    weeks_label = f"{n_paths} weeks" if n_days == 7 else f"{n_paths} paths x {n_days} days"
+    ax.set_title(f"24h BG Traces — {weeks_label}")
     ax.legend(loc="upper left")
     ax.set_ylim(40, 300)
     ax.grid(True, alpha=0.2)
@@ -559,9 +560,9 @@ def compute_summary_stats(all_metrics):
         "Time >250 (%)": f"{np.mean([m.time_above_250 for m in all_metrics]):.2f}",
         "CV (%)": f"{np.mean([m.cv for m in all_metrics]):.1f}",
         "GMI (%)": f"{np.mean([m.gmi for m in all_metrics]):.2f}",
-        "Hypo events/path": f"{np.mean([m.hypo_events for m in all_metrics]):.2f}",
-        "Rescue carb events/path": f"{np.mean([m.rescue_carb_events for m in all_metrics]):.1f}",
-        "Rescue carbs (g)/path": f"{np.mean([m.rescue_carb_grams_total for m in all_metrics]):.0f}",
+        "Hypo events/week": f"{np.mean([m.hypo_events for m in all_metrics]):.2f}",
+        "Rescue carb events/week": f"{np.mean([m.rescue_carb_events for m in all_metrics]):.1f}",
+        "Rescue carbs (g)/week": f"{np.mean([m.rescue_carb_grams_total for m in all_metrics]):.0f}",
     }
 
 
@@ -686,7 +687,7 @@ with tab_patient:
     st.divider()
 
     st.subheader("Exercise")
-    st.caption("Select which days of the week have exercise. Day 0 = Monday.")
+    st.caption("Select which days of the week have exercise. Each week runs Mon-Sun.")
     _ex_day_cols = st.columns(7)
     _DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     for i, (_col, _name) in enumerate(zip(_ex_day_cols, _DAY_NAMES)):
@@ -1230,7 +1231,7 @@ with tab_results:
                     _variant_display_name(vl) for vl in variant_labels)
             else:
                 variant_summary = f"{len(variant_labels)} variants"
-            total_work = f"{n_paths} paths x {n_days} days"
+            total_work = f"{n_paths} weeks"
 
             progress = st.progress(0, text=f"Starting {variant_summary} — {total_work}...")
             t_start = _time.time()
@@ -1259,11 +1260,11 @@ with tab_results:
                         elapsed = _time.time() - t_start
                         if done >= n_paths:
                             progress.progress(1.0,
-                                text=f"Cloud: all {n_paths} paths done in {elapsed:.1f}s — rendering...")
+                                text=f"Cloud: all {n_paths} weeks done in {elapsed:.1f}s — rendering...")
                         else:
                             eta = _eta_str(elapsed, frac)
                             progress.progress(frac,
-                                text=f"Cloud: {done}/{n_paths} paths — "
+                                text=f"Cloud: {done}/{n_paths} weeks — "
                                      f"{elapsed:.0f}s elapsed, {eta}")
 
                     traces_by_variant, metrics_by_variant, flags_by_variant = run_paths_cloud(
@@ -1287,7 +1288,7 @@ with tab_results:
                         elapsed = _time.time() - t_start
                         eta = _eta_str(elapsed, frac)
                         progress.progress(frac,
-                            text=f"{_label}: path {path_count}/{n_paths} — "
+                            text=f"{_label}: week {path_count}/{n_paths} — "
                                  f"{done}/{total_paths} total, "
                                  f"{elapsed:.0f}s elapsed, {eta}")
 
@@ -1488,8 +1489,9 @@ in the sidebar under **Additional Profiles to Compare**.
 
 ## How the Simulator Works
 
-The simulator runs many independent "paths" — each one simulates a full day (or multi-day
-period) of a Type 1 diabetic wearing an insulin pump controlled by a closed-loop algorithm.
+The simulator runs many independent weekly "paths" — each one simulates a full Mon-Sun week
+of a Type 1 diabetic wearing an insulin pump controlled by a closed-loop algorithm.
+Exercise occurs on the same fixed days each week; all other variation is random.
 
 Each 5-minute step:
 1. **Patient physiology** computes BG change from active insulin, absorbing carbs, and
@@ -1500,12 +1502,12 @@ Each 5-minute step:
    carbs. Rescue carb behavior is configurable — amount, absorption speed, cooldown, and
    what percentage the patient declares to the pump
 
-Every path draws fresh random values for meal sizes, carb counting errors, insulin
-sensitivity, and exercise — so the collection of paths shows the range of outcomes you'd
-see over many real days.
+Every week draws fresh random values for meal sizes, carb counting errors, and insulin
+sensitivity — so the collection of weeks shows the range of outcomes you'd see over
+many real weeks. Exercise days are deterministic (fixed to the days you select).
 
-When Modal (a serverless compute platform) is available, paths are automatically
-dispatched to cloud workers in parallel for faster results. Otherwise, paths run locally.
+When Modal (a serverless compute platform) is available, weeks are automatically
+dispatched to cloud workers in parallel for faster results. Otherwise, weeks run locally.
 
 ---
 
@@ -1602,18 +1604,19 @@ independently.
 ## Reading the Results
 
 ### Spaghetti Plot
-Each thin line is one simulated day. The thick line is the **median** across all days.
+Each thin line is one simulated day (from all weeks). The thick line is the **median**
+across all day-traces. Use the **Day filter** to show only exercise or rest days.
 The green band marks the target range (70-180 mg/dL). Tight bundles = consistent
 performance; wide spread = high variability.
 
 ### Summary Statistics
-- **Mean BG** — average blood glucose across all paths
+- **Mean BG** — average blood glucose across all weeks
 - **TIR 70-180** — Time In Range: percentage of readings between 70-180 mg/dL (higher is better; clinical target >70%)
 - **Time <70 / <54** — time in hypoglycemia / severe hypoglycemia (lower is better; target <4% / <1%)
 - **Time >180 / >250** — time in hyperglycemia / severe hyperglycemia (lower is better; target <25%)
 - **CV** — Coefficient of Variation: glucose variability as a percentage (lower is better; target <36%)
 - **GMI** — Glucose Management Indicator: estimated A1C from mean glucose
-- **Hypo events/path** — average distinct hypoglycemia episodes (3+ consecutive readings below 70)
+- **Hypo events/week** — average distinct hypoglycemia episodes per week (3+ consecutive readings below 70)
 
 ### Head-to-Head
 When exactly 2 variants are selected, each paired path is compared: which had higher TIR,
