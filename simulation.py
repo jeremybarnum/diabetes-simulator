@@ -60,8 +60,10 @@ class ExerciseSpec:
 class PatientProfile:
     """Complete configuration for a simulated patient."""
 
-    # Meal schedule
-    meals: List[MealSpec] = field(default_factory=list)
+    # Meal schedule (rest days / default)
+    meals_rest: List[MealSpec] = field(default_factory=list)
+    # Meal schedule (exercise days — empty means use rest-day meals)
+    meals_exercise: List[MealSpec] = field(default_factory=list)
 
     # Carb estimation skill (lognormal sigma)
     carb_count_sigma: float = 0.15    # Random error in carb estimation
@@ -72,7 +74,8 @@ class PatientProfile:
 
     # Undeclared meals
     undeclared_meal_prob: float = 0.0  # Probability a meal goes completely undeclared
-    undeclared_meals: List[MealSpec] = field(default_factory=list)  # Extra undeclared snacks
+    undeclared_meals_rest: List[MealSpec] = field(default_factory=list)
+    undeclared_meals_exercise: List[MealSpec] = field(default_factory=list)
 
     # Daily sensitivity variation
     sensitivity_sigma: float = 0.15
@@ -101,9 +104,15 @@ class PatientProfile:
         with open(path) as f:
             data = json.load(f)
 
-        meals = [MealSpec(**{k: v for k, v in m.items()
-                           if k in MealSpec.__dataclass_fields__})
-                 for m in data.get('meals', [])]
+        def _parse_meals(raw):
+            return [MealSpec(**{k: v for k, v in m.items()
+                               if k in MealSpec.__dataclass_fields__})
+                    for m in raw]
+
+        # Backward compat: 'meals' key treated as 'meals_rest'
+        meals_rest = _parse_meals(data.get('meals_rest', data.get('meals', [])))
+        meals_exercise = _parse_meals(data.get('meals_exercise', []))
+
         exercise_spec = None
         if 'exercise_spec' in data:
             exercise_spec = ExerciseSpec(**data['exercise_spec'])
@@ -114,21 +123,30 @@ class PatientProfile:
             with open(settings_path) as f:
                 settings = json.load(f)
 
-        # Backward compat: merge old undeclared_meals into meals with declared=False
-        undeclared_meals = []
-        for m in data.get('undeclared_meals', []):
-            spec = MealSpec(**{k: v for k, v in m.items()
-                              if k in MealSpec.__dataclass_fields__})
-            spec.declared = False
-            undeclared_meals.append(spec)
+        def _parse_undeclared(raw):
+            result = []
+            for m in raw:
+                spec = MealSpec(**{k: v for k, v in m.items()
+                                  if k in MealSpec.__dataclass_fields__})
+                spec.declared = False
+                result.append(spec)
+            return result
+
+        # Backward compat: 'undeclared_meals' key treated as 'undeclared_meals_rest'
+        undeclared_meals_rest = _parse_undeclared(
+            data.get('undeclared_meals_rest', data.get('undeclared_meals', [])))
+        undeclared_meals_exercise = _parse_undeclared(
+            data.get('undeclared_meals_exercise', []))
 
         return cls(
-            meals=meals,
+            meals_rest=meals_rest,
+            meals_exercise=meals_exercise,
             carb_count_sigma=data.get('carb_count_sigma', 0.15),
             carb_count_bias=data.get('carb_count_bias', 0.0),
             absorption_sigma=data.get('absorption_sigma', 0.15),
             undeclared_meal_prob=data.get('undeclared_meal_prob', 0.0),
-            undeclared_meals=undeclared_meals,
+            undeclared_meals_rest=undeclared_meals_rest,
+            undeclared_meals_exercise=undeclared_meals_exercise,
             sensitivity_sigma=data.get('sensitivity_sigma', 0.15),
             exercise_days=data.get('exercise_days', []),
             exercise_spec=exercise_spec,
@@ -682,19 +700,32 @@ class SimulationRun:
         """Generate all meal events for the full simulation.
 
         Each MealSpec has a `declared` flag and optional per-meal `carb_count_sigma`.
-        For backward compat, undeclared_meals are also included (always undeclared).
+        Undeclared meal specs are also included (always undeclared).
         The global `undeclared_meal_prob` can randomly make any declared meal undeclared.
+
+        On exercise days, uses meals_exercise/undeclared_meals_exercise if non-empty,
+        otherwise falls back to rest-day meals.
         """
         meals = []
         global_bias = self.profile.carb_count_bias
         global_sigma = self.profile.carb_count_sigma
         abs_sigma = self.profile.absorption_sigma
 
-        # Combine declared and undeclared meal specs into one list
-        all_specs = list(self.profile.meals) + list(self.profile.undeclared_meals)
+        exercise_day_set = set(self.profile.exercise_days)
 
         for day in range(self.n_days):
             day_offset = self.t0_min + day * 1440
+
+            # Pick meal schedule for this day
+            is_exercise_day = day % 7 in exercise_day_set
+            if is_exercise_day and self.profile.meals_exercise:
+                day_meals = self.profile.meals_exercise
+                day_undeclared = self.profile.undeclared_meals_exercise
+            else:
+                day_meals = self.profile.meals_rest
+                day_undeclared = self.profile.undeclared_meals_rest
+
+            all_specs = list(day_meals) + list(day_undeclared)
 
             for spec in all_specs:
                 meal_time = day_offset + spec.time_of_day_minutes

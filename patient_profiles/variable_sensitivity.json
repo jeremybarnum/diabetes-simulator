@@ -1,9 +1,10 @@
 {
-    "meals": [
+    "meals_rest": [
         {"time_of_day_minutes": 30, "carbs_mean": 30, "carbs_sd": 10, "absorption_hrs": 3.0},
         {"time_of_day_minutes": 330, "carbs_mean": 50, "carbs_sd": 15, "absorption_hrs": 3.0},
         {"time_of_day_minutes": 690, "carbs_mean": 60, "carbs_sd": 20, "absorption_hrs": 3.5}
     ],
+    "meals_exercise": [],
     "carb_count_sigma": 0.12,
     "absorption_sigma": 0.12,
     "sensitivity_sigma": 0.30,

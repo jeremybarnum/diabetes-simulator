@@ -1032,12 +1032,12 @@ def build_profile(
 
     # --- Assemble profile ---
     profile = {
-        "meals": meal_specs,
+        "meals_rest": meal_specs,
         "carb_count_sigma": l2_carb_count_sigma,
         "carb_count_bias": l2_carb_count_bias,
         "absorption_sigma": 0.15,
         "undeclared_meal_prob": 0.0,
-        "undeclared_meals": [],
+        "undeclared_meals_rest": [],
         "sensitivity_sigma": l2_sensitivity_sigma,
         "exercise_days": _pick_exercise_days(exercise_dates, exercises_per_week),
         "starting_bg": bg_stats["starting_bg"],

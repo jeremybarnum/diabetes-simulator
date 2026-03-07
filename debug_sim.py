@@ -139,7 +139,7 @@ def test_flat_bg():
     settings = _default_settings()
     target = settings.get('target', 100.0)
     profile = PatientProfile(
-        meals=[],
+        meals_rest=[],
         carb_count_sigma=0.0,
         carb_count_bias=0.0,
         sensitivity_sigma=0.0,
@@ -162,7 +162,7 @@ def test_flat_bg():
 def test_single_meal_perfect():
     """One 50g meal at noon, perfect declarations, no sensitivity error."""
     profile = PatientProfile(
-        meals=[MealSpec(time_of_day_minutes=300, carbs_mean=50.0, carbs_sd=0.0,
+        meals_rest=[MealSpec(time_of_day_minutes=300, carbs_mean=50.0, carbs_sd=0.0,
                         absorption_hrs=3.0)],
         carb_count_sigma=0.0,
         carb_count_bias=0.0,
@@ -185,7 +185,7 @@ def test_single_meal_perfect():
 def test_single_meal_underdeclared():
     """Same 50g meal but declares only ~60% (bias=0.5)."""
     profile = PatientProfile(
-        meals=[MealSpec(time_of_day_minutes=300, carbs_mean=50.0, carbs_sd=0.0,
+        meals_rest=[MealSpec(time_of_day_minutes=300, carbs_mean=50.0, carbs_sd=0.0,
                         absorption_hrs=3.0)],
         carb_count_sigma=0.0,
         carb_count_bias=0.5,
@@ -221,7 +221,7 @@ def test_sensitivity_only():
     for i in range(n_paths):
         seed = i
         profile = PatientProfile(
-            meals=[],
+            meals_rest=[],
             carb_count_sigma=0.0,
             carb_count_bias=0.0,
             sensitivity_sigma=0.28,
@@ -305,7 +305,7 @@ def test_breakfast_zoom():
 
     # Case A: Perfect declaration
     profile_a = PatientProfile(
-        meals=[MealSpec(time_of_day_minutes=60, carbs_mean=6.8, carbs_sd=0.0,
+        meals_rest=[MealSpec(time_of_day_minutes=60, carbs_mean=6.8, carbs_sd=0.0,
                         absorption_hrs=3.0)],
         carb_count_sigma=0.0,
         carb_count_bias=0.0,
@@ -318,7 +318,7 @@ def test_breakfast_zoom():
 
     # Case B: NS-inferred bias
     profile_b = PatientProfile(
-        meals=[MealSpec(time_of_day_minutes=60, carbs_mean=6.8, carbs_sd=0.0,
+        meals_rest=[MealSpec(time_of_day_minutes=60, carbs_mean=6.8, carbs_sd=0.0,
                         absorption_hrs=3.0)],
         carb_count_sigma=0.0,
         carb_count_bias=0.57,
@@ -388,7 +388,7 @@ def test_breakfast_realistic():
     }
 
     profile = PatientProfile(
-        meals=[
+        meals_rest=[
             MealSpec(time_of_day_minutes=0, carbs_mean=5.0, carbs_sd=0.0,
                      absorption_hrs=1.0),     # Coffee at 7am, fast
             MealSpec(time_of_day_minutes=90, carbs_mean=15.0, carbs_sd=0.0,
@@ -485,7 +485,7 @@ def test_exercise_check():
     for i in range(n_paths):
         seed = i
         profile = PatientProfile(
-            meals=[],
+            meals_rest=[],
             carb_count_sigma=0.0,
             carb_count_bias=0.0,
             sensitivity_sigma=0.0,

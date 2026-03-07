@@ -31,7 +31,7 @@ def perturb(profile_dict, param_name, delta):
     """Return a copy of profile_dict with one parameter perturbed."""
     p = copy.deepcopy(profile_dict)
     if param_name == "meal_scale":
-        for m in p["meals"]:
+        for m in p.get("meals_rest", p.get("meals", [])):
             m["carbs_mean"] *= (1.0 + delta)
             m["carbs_sd"] *= (1.0 + delta)
     elif param_name == "carb_count_bias":

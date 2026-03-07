@@ -76,8 +76,10 @@ def save_profile_to_json(file_path: str):
         return d
 
     data = {
-        "meals": [_meal_to_dict(m) for m in profile.meals],
-        "undeclared_meals": [_meal_to_dict(m) for m in profile.undeclared_meals],
+        "meals_rest": [_meal_to_dict(m) for m in profile.meals_rest],
+        "meals_exercise": [_meal_to_dict(m) for m in profile.meals_exercise],
+        "undeclared_meals_rest": [_meal_to_dict(m) for m in profile.undeclared_meals_rest],
+        "undeclared_meals_exercise": [_meal_to_dict(m) for m in profile.undeclared_meals_exercise],
         "carb_count_sigma": profile.carb_count_sigma,
         "carb_count_bias": profile.carb_count_bias,
         "absorption_sigma": profile.absorption_sigma,
@@ -126,36 +128,39 @@ def load_profile_to_state(profile_path: str):
     profile = PatientProfile.from_json(profile_path)
     settings = profile.get_settings()
 
-    # Meals as single DataFrame (merging declared + undeclared)
+    # Build meal DataFrames for rest and exercise days
     global_sigma = float(profile.carb_count_sigma)
-    all_meal_rows = []
-    for m in profile.meals:
-        all_meal_rows.append({
-            "Time": _minutes_to_clock(m.time_of_day_minutes),
-            "Avg Carbs (g)": float(m.carbs_mean),
-            "SD (g)": float(m.carbs_sd),
-            "Absorption (hrs)": float(m.absorption_hrs),
-            "Declared": m.declared,
-            "Count Error σ": float(m.carb_count_sigma) if m.carb_count_sigma is not None else global_sigma,
-        })
-    for m in profile.undeclared_meals:
-        all_meal_rows.append({
-            "Time": _minutes_to_clock(m.time_of_day_minutes),
-            "Avg Carbs (g)": float(m.carbs_mean),
-            "SD (g)": float(m.carbs_sd),
-            "Absorption (hrs)": float(m.absorption_hrs),
-            "Declared": False,
-            "Count Error σ": global_sigma,
-        })
-    all_meal_rows.sort(key=lambda r: r["Time"])
-    if all_meal_rows:
-        st.session_state["meals_df"] = pd.DataFrame(all_meal_rows)
-    else:
-        st.session_state["meals_df"] = pd.DataFrame(
-            {"Time": pd.Series(dtype=str), "Avg Carbs (g)": pd.Series(dtype=float),
-             "SD (g)": pd.Series(dtype=float), "Absorption (hrs)": pd.Series(dtype=float),
-             "Declared": pd.Series(dtype=bool), "Count Error σ": pd.Series(dtype=float)}
-        )
+    empty_meals_df = pd.DataFrame(
+        {"Time": pd.Series(dtype=str), "Avg Carbs (g)": pd.Series(dtype=float),
+         "SD (g)": pd.Series(dtype=float), "Absorption (hrs)": pd.Series(dtype=float),
+         "Declared": pd.Series(dtype=bool), "Count Error σ": pd.Series(dtype=float)}
+    )
+
+    def _build_meals_df(declared_meals, undeclared_meals):
+        rows = []
+        for m in declared_meals:
+            rows.append({
+                "Time": _minutes_to_clock(m.time_of_day_minutes),
+                "Avg Carbs (g)": float(m.carbs_mean),
+                "SD (g)": float(m.carbs_sd),
+                "Absorption (hrs)": float(m.absorption_hrs),
+                "Declared": m.declared,
+                "Count Error σ": float(m.carb_count_sigma) if m.carb_count_sigma is not None else global_sigma,
+            })
+        for m in undeclared_meals:
+            rows.append({
+                "Time": _minutes_to_clock(m.time_of_day_minutes),
+                "Avg Carbs (g)": float(m.carbs_mean),
+                "SD (g)": float(m.carbs_sd),
+                "Absorption (hrs)": float(m.absorption_hrs),
+                "Declared": False,
+                "Count Error σ": global_sigma,
+            })
+        rows.sort(key=lambda r: r["Time"])
+        return pd.DataFrame(rows) if rows else empty_meals_df.copy()
+
+    st.session_state["meals_rest_df"] = _build_meals_df(profile.meals_rest, profile.undeclared_meals_rest)
+    st.session_state["meals_exercise_df"] = _build_meals_df(profile.meals_exercise, profile.undeclared_meals_exercise)
 
     # Patient model sliders — keys match the widget key= params
     st.session_state["carb_count_sigma_sl"] = float(profile.carb_count_sigma)
@@ -220,31 +225,35 @@ def load_profile_to_state(profile_path: str):
 
 def build_profile_from_state() -> PatientProfile:
     """Construct a PatientProfile from current session state (widget keys)."""
-    # Parse meals from data_editor results
-    meals = []
-    undeclared_meals = []
-    meals_df = st.session_state.get("meals_df")
-    if meals_df is not None and len(meals_df) > 0:
-        for _, row in meals_df.iterrows():
-            try:
-                t_min = _clock_to_minutes(str(row["Time"]))
-                declared = bool(row.get("Declared", True))
-                count_sigma_val = row.get("Count Error σ")
-                count_sigma = float(count_sigma_val) if pd.notna(count_sigma_val) else None
-                spec = MealSpec(
-                    time_of_day_minutes=t_min,
-                    carbs_mean=float(row["Avg Carbs (g)"]),
-                    carbs_sd=float(row["SD (g)"]),
-                    absorption_hrs=float(row["Absorption (hrs)"]),
-                    declared=declared,
-                    carb_count_sigma=count_sigma,
-                )
-                if declared:
-                    meals.append(spec)
-                else:
-                    undeclared_meals.append(spec)
-            except (ValueError, KeyError):
-                continue
+    def _parse_meals_df(df_key):
+        declared = []
+        undeclared = []
+        df = st.session_state.get(df_key)
+        if df is not None and len(df) > 0:
+            for _, row in df.iterrows():
+                try:
+                    t_min = _clock_to_minutes(str(row["Time"]))
+                    is_declared = bool(row.get("Declared", True))
+                    count_sigma_val = row.get("Count Error σ")
+                    count_sigma = float(count_sigma_val) if pd.notna(count_sigma_val) else None
+                    spec = MealSpec(
+                        time_of_day_minutes=t_min,
+                        carbs_mean=float(row["Avg Carbs (g)"]),
+                        carbs_sd=float(row["SD (g)"]),
+                        absorption_hrs=float(row["Absorption (hrs)"]),
+                        declared=is_declared,
+                        carb_count_sigma=count_sigma,
+                    )
+                    if is_declared:
+                        declared.append(spec)
+                    else:
+                        undeclared.append(spec)
+                except (ValueError, KeyError):
+                    continue
+        return declared, undeclared
+
+    meals_rest, undeclared_meals_rest = _parse_meals_df("meals_rest_df")
+    meals_exercise, undeclared_meals_exercise = _parse_meals_df("meals_exercise_df")
 
     # Exercise
     exercise_spec = None
@@ -278,12 +287,14 @@ def build_profile_from_state() -> PatientProfile:
     }
 
     return PatientProfile(
-        meals=meals,
+        meals_rest=meals_rest,
+        meals_exercise=meals_exercise,
         carb_count_sigma=st.session_state.get("carb_count_sigma_sl", 0.15),
         carb_count_bias=st.session_state.get("carb_count_bias_sl", 0.0),
         absorption_sigma=st.session_state.get("absorption_sigma_sl", 0.15),
         undeclared_meal_prob=st.session_state.get("undeclared_meal_prob_sl", 0.0),
-        undeclared_meals=undeclared_meals,
+        undeclared_meals_rest=undeclared_meals_rest,
+        undeclared_meals_exercise=undeclared_meals_exercise,
         sensitivity_sigma=st.session_state.get("sensitivity_sigma_sl", 0.15),
         exercise_days=exercise_days,
         exercise_spec=exercise_spec,
@@ -612,38 +623,69 @@ tab_results, tab_patient, tab_algo, tab_ns, tab_help = st.tabs([
 with tab_patient:
     st.caption("These are the active settings used when you click **Run Simulation**. "
                "Use **Load Profile** in the sidebar to reset from a preset.")
-    st.subheader("Meal Schedule")
-    st.caption("Times are in 24h clock format (HH:MM). Day starts at 07:00. "
+
+    # Weekly schedule (exercise days) — shown first so user sees context for meal editors
+    st.subheader("Weekly Schedule")
+    st.caption("Which days are exercise days? Each simulated week runs Mon-Sun.")
+    _ex_day_cols = st.columns(7)
+    _DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    for i, (_col, _name) in enumerate(zip(_ex_day_cols, _DAY_NAMES)):
+        with _col:
+            st.checkbox(_name, key=f"ex_day_{i}_cb")
+
+    _MEAL_EDITOR_COLUMNS = {
+        "Time": st.column_config.TextColumn(
+            "Time (HH:MM)", help="24h clock time"),
+        "Avg Carbs (g)": st.column_config.NumberColumn(
+            "Avg Carbs (g)", min_value=0, max_value=200, step=1),
+        "SD (g)": st.column_config.NumberColumn(
+            "SD (g)", min_value=0, max_value=50, step=1),
+        "Absorption (hrs)": st.column_config.NumberColumn(
+            "Absorption (hrs)", min_value=0.5, max_value=8.0, step=0.5),
+        "Declared": st.column_config.CheckboxColumn(
+            "Declared", help="If unchecked, meal is eaten but never entered into the pump", default=True),
+        "Count Error σ": st.column_config.NumberColumn(
+            "Count Error σ", min_value=0.0, max_value=1.0, step=0.05, default=0.15,
+            help="Per-meal carb counting error sigma."),
+    }
+
+    st.divider()
+
+    st.subheader("Typical Rest Day Meals")
+    st.caption("Times are in 24h clock (HH:MM). Day starts at 07:00. "
                "**Declared** meals are entered into the pump (with carb-counting error applied). "
-               "Undeclared meals are eaten but never bolused for. "
-               "**Count Error σ** overrides the global carb counting sigma for that meal (blank = use global).")
+               "Undeclared meals are eaten but never bolused for.")
 
     @st.fragment
-    def meal_editor_fragment():
-        edited_meals = st.data_editor(
-            st.session_state["meals_df"],
+    def rest_meal_editor_fragment():
+        edited = st.data_editor(
+            st.session_state["meals_rest_df"],
             num_rows="dynamic",
             use_container_width=True,
-            key="meals_editor",
-            column_config={
-                "Time": st.column_config.TextColumn(
-                    "Time (HH:MM)", help="24h clock time"),
-                "Avg Carbs (g)": st.column_config.NumberColumn(
-                    "Avg Carbs (g)", min_value=0, max_value=200, step=1),
-                "SD (g)": st.column_config.NumberColumn(
-                    "SD (g)", min_value=0, max_value=50, step=1),
-                "Absorption (hrs)": st.column_config.NumberColumn(
-                    "Absorption (hrs)", min_value=0.5, max_value=8.0, step=0.5),
-                "Declared": st.column_config.CheckboxColumn(
-                    "Declared", help="If unchecked, meal is eaten but never entered into the pump", default=True),
-                "Count Error σ": st.column_config.NumberColumn(
-                    "Count Error σ", min_value=0.0, max_value=1.0, step=0.05, default=0.15,
-                    help="Per-meal carb counting error sigma."),
-            },
+            key="meals_rest_editor",
+            column_config=_MEAL_EDITOR_COLUMNS,
         )
-        st.session_state["meals_df"] = edited_meals.sort_values("Time").reset_index(drop=True)
+        st.session_state["meals_rest_df"] = edited.sort_values("Time").reset_index(drop=True)
 
-    meal_editor_fragment()
+    rest_meal_editor_fragment()
+
+    st.divider()
+
+    st.subheader("Typical Exercise Day Meals")
+    st.caption("Leave empty to use rest-day meals on exercise days too.")
+
+    @st.fragment
+    def exercise_meal_editor_fragment():
+        edited = st.data_editor(
+            st.session_state["meals_exercise_df"],
+            num_rows="dynamic",
+            use_container_width=True,
+            key="meals_exercise_editor",
+            column_config=_MEAL_EDITOR_COLUMNS,
+        )
+        st.session_state["meals_exercise_df"] = edited.sort_values("Time").reset_index(drop=True)
+
+    exercise_meal_editor_fragment()
 
     st.divider()
 
@@ -689,14 +731,7 @@ with tab_patient:
 
     st.divider()
 
-    st.subheader("Exercise")
-    st.caption("Select which days of the week have exercise. Each week runs Mon-Sun.")
-    _ex_day_cols = st.columns(7)
-    _DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-    for i, (_col, _name) in enumerate(zip(_ex_day_cols, _DAY_NAMES)):
-        with _col:
-            st.checkbox(_name, key=f"ex_day_{i}_cb")
-
+    st.subheader("Exercise Parameters")
     _any_exercise = any(st.session_state.get(f"ex_day_{i}_cb", False) for i in range(7))
     if _any_exercise:
         st.markdown("**Exercise Parameters**")
@@ -843,8 +878,10 @@ with tab_patient:
                     d["carb_count_sigma"] = m.carb_count_sigma
                 return d
             export_data = {
-                "meals": [_meal_export(m) for m in profile.meals],
-                "undeclared_meals": [_meal_export(m) for m in profile.undeclared_meals],
+                "meals_rest": [_meal_export(m) for m in profile.meals_rest],
+                "meals_exercise": [_meal_export(m) for m in profile.meals_exercise],
+                "undeclared_meals_rest": [_meal_export(m) for m in profile.undeclared_meals_rest],
+                "undeclared_meals_exercise": [_meal_export(m) for m in profile.undeclared_meals_exercise],
                 "carb_count_sigma": profile.carb_count_sigma,
                 "carb_count_bias": profile.carb_count_bias,
                 "absorption_sigma": profile.absorption_sigma,
@@ -1148,7 +1185,7 @@ with tab_ns:
 
             # Detected meals
             st.subheader("Detected Meals")
-            meals = profile_dict.get("meals", [])
+            meals = profile_dict.get("meals_rest", profile_dict.get("meals", []))
             if meals:
                 meal_rows = []
                 for m in meals:

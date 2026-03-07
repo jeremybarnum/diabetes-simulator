@@ -192,18 +192,24 @@ def _run_single_path(args) -> Dict[str, dict]:
 def _profile_from_dict(d: Dict) -> PatientProfile:
     """Reconstruct PatientProfile from a serializable dict."""
     from simulation import MealSpec, ExerciseSpec
-    meals = [MealSpec(**m) for m in d.get('meals', [])]
+    # Backward compat: 'meals' key treated as 'meals_rest'
+    meals_rest = [MealSpec(**m) for m in d.get('meals_rest', d.get('meals', []))]
+    meals_exercise = [MealSpec(**m) for m in d.get('meals_exercise', [])]
     exercise_spec = None
     if d.get('exercise_spec'):
         exercise_spec = ExerciseSpec(**d['exercise_spec'])
-    undeclared_meals = [MealSpec(**m) for m in d.get('undeclared_meals', [])]
+    undeclared_meals_rest = [MealSpec(**m) for m in
+                             d.get('undeclared_meals_rest', d.get('undeclared_meals', []))]
+    undeclared_meals_exercise = [MealSpec(**m) for m in d.get('undeclared_meals_exercise', [])]
     return PatientProfile(
-        meals=meals,
+        meals_rest=meals_rest,
+        meals_exercise=meals_exercise,
         carb_count_sigma=d.get('carb_count_sigma', 0.15),
         carb_count_bias=d.get('carb_count_bias', 0.0),
         absorption_sigma=d.get('absorption_sigma', 0.15),
         undeclared_meal_prob=d.get('undeclared_meal_prob', 0.0),
-        undeclared_meals=undeclared_meals,
+        undeclared_meals_rest=undeclared_meals_rest,
+        undeclared_meals_exercise=undeclared_meals_exercise,
         sensitivity_sigma=d.get('sensitivity_sigma', 0.15),
         exercise_days=d.get('exercise_days', []),
         exercise_spec=exercise_spec,
@@ -221,9 +227,10 @@ def _profile_from_dict(d: Dict) -> PatientProfile:
 
 def _profile_to_dict(p: PatientProfile) -> Dict:
     """Serialize PatientProfile to a picklable dict."""
-    meals = [{'time_of_day_minutes': m.time_of_day_minutes,
-              'carbs_mean': m.carbs_mean, 'carbs_sd': m.carbs_sd,
-              'absorption_hrs': m.absorption_hrs} for m in p.meals]
+    def _meal_list(specs):
+        return [{'time_of_day_minutes': m.time_of_day_minutes,
+                 'carbs_mean': m.carbs_mean, 'carbs_sd': m.carbs_sd,
+                 'absorption_hrs': m.absorption_hrs} for m in specs]
     ex = None
     if p.exercise_spec:
         ex = {
@@ -235,17 +242,15 @@ def _profile_to_dict(p: PatientProfile) -> Dict:
             'actual_duration_hrs_mean': p.exercise_spec.actual_duration_hrs_mean,
             'actual_duration_hrs_sigma': p.exercise_spec.actual_duration_hrs_sigma,
         }
-    undeclared_meals = [{'time_of_day_minutes': m.time_of_day_minutes,
-                          'carbs_mean': m.carbs_mean, 'carbs_sd': m.carbs_sd,
-                          'absorption_hrs': m.absorption_hrs}
-                         for m in p.undeclared_meals]
     return {
-        'meals': meals,
+        'meals_rest': _meal_list(p.meals_rest),
+        'meals_exercise': _meal_list(p.meals_exercise),
         'carb_count_sigma': p.carb_count_sigma,
         'carb_count_bias': p.carb_count_bias,
         'absorption_sigma': p.absorption_sigma,
         'undeclared_meal_prob': p.undeclared_meal_prob,
-        'undeclared_meals': undeclared_meals,
+        'undeclared_meals_rest': _meal_list(p.undeclared_meals_rest),
+        'undeclared_meals_exercise': _meal_list(p.undeclared_meals_exercise),
         'sensitivity_sigma': p.sensitivity_sigma,
         'exercise_days': p.exercise_days,
         'exercise_spec': ex,
@@ -465,7 +470,7 @@ def default_profile() -> PatientProfile:
         settings = json.load(f)
 
     return PatientProfile(
-        meals=[
+        meals_rest=[
             MealSpec(time_of_day_minutes=30, carbs_mean=30, carbs_sd=10,
                      absorption_hrs=3.0),   # Breakfast at 7:30am
             MealSpec(time_of_day_minutes=330, carbs_mean=50, carbs_sd=15,
@@ -522,7 +527,7 @@ def main():
         print(f"Profiles: {', '.join(label for label, _ in profiles_list)}")
     print(f"Sensitivity sigma: {profile.sensitivity_sigma}")
     print(f"Carb count sigma: {profile.carb_count_sigma}")
-    print(f"Meals/day: {len(profile.meals)}")
+    print(f"Meals/day (rest): {len(profile.meals_rest)}")
     print()
 
     workers = args.workers

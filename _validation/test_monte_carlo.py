@@ -37,13 +37,13 @@ MAX_WORKERS = os.cpu_count() or 4
 def make_base_profile(**overrides):
     """Create a reproducible base profile for directional tests."""
     defaults = dict(
-        meals=[MealSpec(time_of_day_minutes=180, carbs_mean=50, carbs_sd=5,
+        meals_rest=[MealSpec(time_of_day_minutes=180, carbs_mean=50, carbs_sd=5,
                         absorption_hrs=3.0)],
         carb_count_sigma=0.15,
         carb_count_bias=0.0,
         absorption_sigma=0.15,
         undeclared_meal_prob=0.0,
-        undeclared_meals=[],
+        undeclared_meals_rest=[],
         sensitivity_sigma=0.15,
         starting_bg=120.0,
         rescue_carbs_enabled=True,
@@ -199,10 +199,10 @@ def test_rescue_carbs_reduce_severe_hypos(verbose=False):
 
 def test_undeclared_meals_lower_tir(verbose=False):
     """Undeclared meals → lower TIR."""
-    base = make_base_profile(undeclared_meal_prob=0.0, undeclared_meals=[])
+    base = make_base_profile(undeclared_meal_prob=0.0, undeclared_meals_rest=[])
     modified = make_base_profile(
         undeclared_meal_prob=0.5,
-        undeclared_meals=[
+        undeclared_meals_rest=[
             MealSpec(time_of_day_minutes=480, carbs_mean=30, carbs_sd=5,
                      absorption_hrs=3.0),
         ],
