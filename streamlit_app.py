@@ -1167,16 +1167,13 @@ with tab_ns:
             # Persist NS URL/token for future sessions
             _save_ns_config({"url": url, "token": token or ""})
 
-            st.success(f"Profile saved to **{filename}.json** — loading into simulator...")
+            st.success(f"Profile saved to **{filename}.json**")
 
             # Save standalone NS reference
             from nightscout_profile import save_ns_reference
             ref_path = str(ns_ref_dir / f"{filename}.json")
             save_ns_reference(profile_dict, ref_path)
-
-            # Flag for top-of-page load on next rerun (can't set widget keys after instantiation)
-            st.session_state["_pending_profile_load"] = save_path
-            st.rerun()
+            st.info(f"NS reference trace saved to **ns_references/{filename}.json**")
 
             # Algorithm settings
             st.subheader("Extracted Algorithm Settings")
@@ -1234,8 +1231,9 @@ with tab_ns:
             with st.expander("Full import log"):
                 st.code(log_buffer.getvalue())
 
-            display_name = filename.replace("_", " ").title()
-            st.info(f"**Reload the page** (Ctrl-R / Cmd-R), then select **{display_name}** from the **Load Profile** dropdown in the sidebar.")
+            if st.button(f"Load **{filename}** into simulator", type="primary"):
+                st.session_state["_pending_profile_load"] = save_path
+                st.rerun()
 
 
 # ─── Tab 1: Results ──────────────────────────────────────────────────────────
