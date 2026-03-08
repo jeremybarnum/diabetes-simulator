@@ -71,8 +71,7 @@ def save_profile_to_json(file_path: str):
              "carbs_mean": m.carbs_mean, "carbs_sd": m.carbs_sd,
              "absorption_hrs": m.absorption_hrs,
              "declared": m.declared}
-        if m.carb_count_sigma is not None:
-            d["carb_count_sigma"] = m.carb_count_sigma
+        d["carb_count_sigma"] = m.carb_count_sigma
         return d
 
     data = {
@@ -80,7 +79,6 @@ def save_profile_to_json(file_path: str):
         "meals_exercise": [_meal_to_dict(m) for m in profile.meals_exercise],
         "undeclared_meals_rest": [_meal_to_dict(m) for m in profile.undeclared_meals_rest],
         "undeclared_meals_exercise": [_meal_to_dict(m) for m in profile.undeclared_meals_exercise],
-        "carb_count_sigma": profile.carb_count_sigma,
         "carb_count_bias": profile.carb_count_bias,
         "absorption_sigma": profile.absorption_sigma,
         "undeclared_meal_prob": profile.undeclared_meal_prob,
@@ -129,7 +127,6 @@ def load_profile_to_state(profile_path: str):
     settings = profile.get_settings()
 
     # Build meal DataFrames for rest and exercise days
-    global_sigma = float(profile.carb_count_sigma)
     empty_meals_df = pd.DataFrame(
         {"Time": pd.Series(dtype=str), "Avg Carbs (g)": pd.Series(dtype=float),
          "SD (g)": pd.Series(dtype=float), "Absorption (hrs)": pd.Series(dtype=float),
@@ -145,7 +142,7 @@ def load_profile_to_state(profile_path: str):
                 "SD (g)": float(m.carbs_sd),
                 "Absorption (hrs)": float(m.absorption_hrs),
                 "Declared": m.declared,
-                "Count Error σ": float(m.carb_count_sigma) if m.carb_count_sigma is not None else global_sigma,
+                "Count Error σ": float(m.carb_count_sigma),
             })
         for m in undeclared_meals:
             rows.append({
@@ -154,7 +151,7 @@ def load_profile_to_state(profile_path: str):
                 "SD (g)": float(m.carbs_sd),
                 "Absorption (hrs)": float(m.absorption_hrs),
                 "Declared": False,
-                "Count Error σ": global_sigma,
+                "Count Error σ": float(m.carb_count_sigma),
             })
         rows.sort(key=lambda r: r["Time"])
         return pd.DataFrame(rows) if rows else empty_meals_df.copy()
@@ -163,7 +160,6 @@ def load_profile_to_state(profile_path: str):
     st.session_state["meals_exercise_df"] = _build_meals_df(profile.meals_exercise, profile.undeclared_meals_exercise)
 
     # Patient model sliders — keys match the widget key= params
-    st.session_state["carb_count_sigma_sl"] = float(profile.carb_count_sigma)
     st.session_state["carb_count_bias_sl"] = float(profile.carb_count_bias)
     st.session_state["absorption_sigma_sl"] = float(profile.absorption_sigma)
     st.session_state["undeclared_meal_prob_sl"] = float(profile.undeclared_meal_prob)
@@ -235,7 +231,7 @@ def build_profile_from_state() -> PatientProfile:
                     t_min = _clock_to_minutes(str(row["Time"]))
                     is_declared = bool(row.get("Declared", True))
                     count_sigma_val = row.get("Count Error σ")
-                    count_sigma = float(count_sigma_val) if pd.notna(count_sigma_val) else None
+                    count_sigma = float(count_sigma_val) if pd.notna(count_sigma_val) else 0.15
                     spec = MealSpec(
                         time_of_day_minutes=t_min,
                         carbs_mean=float(row["Avg Carbs (g)"]),
@@ -289,7 +285,6 @@ def build_profile_from_state() -> PatientProfile:
     return PatientProfile(
         meals_rest=meals_rest,
         meals_exercise=meals_exercise,
-        carb_count_sigma=st.session_state.get("carb_count_sigma_sl", 0.15),
         carb_count_bias=st.session_state.get("carb_count_bias_sl", 0.0),
         absorption_sigma=st.session_state.get("absorption_sigma_sl", 0.15),
         undeclared_meal_prob=st.session_state.get("undeclared_meal_prob_sl", 0.0),
@@ -703,12 +698,6 @@ with tab_patient:
     col1, col2 = st.columns(2)
     with col1:
         st.slider(
-            "Carb counting error (sigma)",
-            min_value=0.0, max_value=1.0, step=0.05,
-            help="Lognormal sigma for random carb estimation error",
-            key="carb_count_sigma_sl",
-        )
-        st.slider(
             "Actual absorption variation (sigma)",
             min_value=0.0, max_value=1.0, step=0.05,
             help="Lognormal sigma for day-to-day variation in actual carb absorption speed. "
@@ -722,12 +711,13 @@ with tab_patient:
             help="Positive = patient under-declares carbs, negative = over-declares",
             key="carb_count_bias_sl",
         )
-        st.slider(
-            "Probability meal goes undeclared",
-            min_value=0.0, max_value=1.0, step=0.05,
-            help="Chance that any given meal is eaten but not bolused",
-            key="undeclared_meal_prob_sl",
-        )
+    st.caption("Per-meal carb counting error (σ) is set in the meal table's Count Error σ column.")
+    st.slider(
+        "Probability meal goes undeclared",
+        min_value=0.0, max_value=1.0, step=0.05,
+        help="Chance that any given meal is eaten but not bolused",
+        key="undeclared_meal_prob_sl",
+    )
 
     st.divider()
 
@@ -884,15 +874,13 @@ with tab_patient:
                 d = {"time_of_day_minutes": m.time_of_day_minutes,
                      "carbs_mean": m.carbs_mean, "carbs_sd": m.carbs_sd,
                      "absorption_hrs": m.absorption_hrs, "declared": m.declared}
-                if m.carb_count_sigma is not None:
-                    d["carb_count_sigma"] = m.carb_count_sigma
+                d["carb_count_sigma"] = m.carb_count_sigma
                 return d
             export_data = {
                 "meals_rest": [_meal_export(m) for m in profile.meals_rest],
                 "meals_exercise": [_meal_export(m) for m in profile.meals_exercise],
                 "undeclared_meals_rest": [_meal_export(m) for m in profile.undeclared_meals_rest],
                 "undeclared_meals_exercise": [_meal_export(m) for m in profile.undeclared_meals_exercise],
-                "carb_count_sigma": profile.carb_count_sigma,
                 "carb_count_bias": profile.carb_count_bias,
                 "absorption_sigma": profile.absorption_sigma,
                 "undeclared_meal_prob": profile.undeclared_meal_prob,
@@ -1497,7 +1485,10 @@ with tab_results:
 
         df = pd.DataFrame(columns, index=metric_rows)
         if ref_stats:
-            st.caption(f"NS Reference: {ref_stats.get('start_date', '?')} to {ref_stats.get('end_date', '?')}")
+            _ns_days = ref_stats.get('days', '?')
+            _ns_ex = ref_stats.get('exercise_days', '?')
+            _ns_ex_per_wk = f"{_ns_ex / _ns_days * 7:.1f}" if isinstance(_ns_ex, (int, float)) and isinstance(_ns_days, (int, float)) and _ns_days > 0 else "?"
+            st.caption(f"NS Reference: {ref_stats.get('start_date', '?')} to {ref_stats.get('end_date', '?')} ({_ns_days} days, {_ns_ex_per_wk} exercise days/wk)")
         st.dataframe(df, use_container_width=True)
 
         # Head-to-head (if exactly 2 variants)

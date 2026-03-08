@@ -41,7 +41,7 @@ class MealSpec:
     carbs_sd: float            # SD of actual carbs (grams)
     absorption_hrs: float = 3.0  # True mean absorption time (hours)
     declared: bool = True        # Whether patient declares this meal to the pump
-    carb_count_sigma: Optional[float] = None  # Per-meal counting error (None = use global)
+    carb_count_sigma: float = 0.15  # Carb counting error (lognormal sigma)
 
 
 @dataclass
@@ -65,8 +65,7 @@ class PatientProfile:
     # Meal schedule (exercise days — empty means use rest-day meals)
     meals_exercise: List[MealSpec] = field(default_factory=list)
 
-    # Carb estimation skill (lognormal sigma)
-    carb_count_sigma: float = 0.15    # Random error in carb estimation
+    # Carb estimation skill
     carb_count_bias: float = 0.0      # Systematic bias: >0 means under-declares
                                        # declared = actual * exp(N(-bias, sigma))
                                        # e.g., bias=0.2 -> median declaration is ~82% of actual
@@ -104,10 +103,18 @@ class PatientProfile:
         with open(path) as f:
             data = json.load(f)
 
+        # Backward compat: profile-level carb_count_sigma applied to meals without one
+        profile_sigma = data.get('carb_count_sigma')
+
         def _parse_meals(raw):
-            return [MealSpec(**{k: v for k, v in m.items()
-                               if k in MealSpec.__dataclass_fields__})
-                    for m in raw]
+            meals = []
+            for m in raw:
+                spec = MealSpec(**{k: v for k, v in m.items()
+                                   if k in MealSpec.__dataclass_fields__})
+                if 'carb_count_sigma' not in m and profile_sigma is not None:
+                    spec.carb_count_sigma = profile_sigma
+                meals.append(spec)
+            return meals
 
         # Backward compat: 'meals' key treated as 'meals_rest'
         meals_rest = _parse_meals(data.get('meals_rest', data.get('meals', [])))
@@ -141,7 +148,6 @@ class PatientProfile:
         return cls(
             meals_rest=meals_rest,
             meals_exercise=meals_exercise,
-            carb_count_sigma=data.get('carb_count_sigma', 0.15),
             carb_count_bias=data.get('carb_count_bias', 0.0),
             absorption_sigma=data.get('absorption_sigma', 0.15),
             undeclared_meal_prob=data.get('undeclared_meal_prob', 0.0),
@@ -708,7 +714,6 @@ class SimulationRun:
         """
         meals = []
         global_bias = self.profile.carb_count_bias
-        global_sigma = self.profile.carb_count_sigma
         abs_sigma = self.profile.absorption_sigma
 
         exercise_day_set = set(self.profile.exercise_days)
@@ -758,8 +763,7 @@ class SimulationRun:
                         undeclared=True,
                     ))
                 else:
-                    # Use per-meal sigma if set, otherwise global
-                    sigma = spec.carb_count_sigma if spec.carb_count_sigma is not None else global_sigma
+                    sigma = spec.carb_count_sigma
                     bias = global_bias
 
                     # Patient estimates carb count with bias + random error

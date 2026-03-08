@@ -212,19 +212,30 @@ def _run_single_path(args) -> Dict[str, dict]:
 def _profile_from_dict(d: Dict) -> PatientProfile:
     """Reconstruct PatientProfile from a serializable dict."""
     from simulation import MealSpec, ExerciseSpec
+
+    # Backward compat: profile-level carb_count_sigma applied to meals without one
+    profile_sigma = d.get('carb_count_sigma')
+
+    def _parse_meals(raw):
+        meals = []
+        for m in raw:
+            spec = MealSpec(**m)
+            if 'carb_count_sigma' not in m and profile_sigma is not None:
+                spec.carb_count_sigma = profile_sigma
+            meals.append(spec)
+        return meals
+
     # Backward compat: 'meals' key treated as 'meals_rest'
-    meals_rest = [MealSpec(**m) for m in d.get('meals_rest', d.get('meals', []))]
-    meals_exercise = [MealSpec(**m) for m in d.get('meals_exercise', [])]
+    meals_rest = _parse_meals(d.get('meals_rest', d.get('meals', [])))
+    meals_exercise = _parse_meals(d.get('meals_exercise', []))
     exercise_spec = None
     if d.get('exercise_spec'):
         exercise_spec = ExerciseSpec(**d['exercise_spec'])
-    undeclared_meals_rest = [MealSpec(**m) for m in
-                             d.get('undeclared_meals_rest', d.get('undeclared_meals', []))]
-    undeclared_meals_exercise = [MealSpec(**m) for m in d.get('undeclared_meals_exercise', [])]
+    undeclared_meals_rest = _parse_meals(d.get('undeclared_meals_rest', d.get('undeclared_meals', [])))
+    undeclared_meals_exercise = _parse_meals(d.get('undeclared_meals_exercise', []))
     return PatientProfile(
         meals_rest=meals_rest,
         meals_exercise=meals_exercise,
-        carb_count_sigma=d.get('carb_count_sigma', 0.15),
         carb_count_bias=d.get('carb_count_bias', 0.0),
         absorption_sigma=d.get('absorption_sigma', 0.15),
         undeclared_meal_prob=d.get('undeclared_meal_prob', 0.0),
@@ -265,7 +276,6 @@ def _profile_to_dict(p: PatientProfile) -> Dict:
     return {
         'meals_rest': _meal_list(p.meals_rest),
         'meals_exercise': _meal_list(p.meals_exercise),
-        'carb_count_sigma': p.carb_count_sigma,
         'carb_count_bias': p.carb_count_bias,
         'absorption_sigma': p.absorption_sigma,
         'undeclared_meal_prob': p.undeclared_meal_prob,
@@ -498,7 +508,6 @@ def default_profile() -> PatientProfile:
             MealSpec(time_of_day_minutes=690, carbs_mean=60, carbs_sd=20,
                      absorption_hrs=3.5),   # Dinner at 6:30pm
         ],
-        carb_count_sigma=0.15,
         absorption_sigma=0.15,
         sensitivity_sigma=0.15,
         starting_bg=100.0,
@@ -546,7 +555,6 @@ def main():
     if profiles_list and len(profiles_list) > 1:
         print(f"Profiles: {', '.join(label for label, _ in profiles_list)}")
     print(f"Sensitivity sigma: {profile.sensitivity_sigma}")
-    print(f"Carb count sigma: {profile.carb_count_sigma}")
     print(f"Meals/day (rest): {len(profile.meals_rest)}")
     print()
 

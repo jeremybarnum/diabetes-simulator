@@ -1042,10 +1042,14 @@ def build_profile(
     elif layer2:
         print("\n  Skipping Layer 2: insufficient insulin/CGM data")
 
+    # Stamp estimated carb_count_sigma onto each meal spec
+    for spec in meal_specs:
+        if "carb_count_sigma" not in spec:
+            spec["carb_count_sigma"] = l2_carb_count_sigma
+
     # --- Assemble profile ---
     profile = {
         "meals_rest": meal_specs,
-        "carb_count_sigma": l2_carb_count_sigma,
         "carb_count_bias": l2_carb_count_bias,
         "absorption_sigma": 0.15,
         "undeclared_meal_prob": 0.0,

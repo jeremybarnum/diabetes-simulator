@@ -36,10 +36,11 @@ MAX_WORKERS = os.cpu_count() or 4
 
 def make_base_profile(**overrides):
     """Create a reproducible base profile for directional tests."""
+    # Per-meal carb_count_sigma: extract from overrides or default to 0.15
+    meal_sigma = overrides.pop('carb_count_sigma', 0.15)
     defaults = dict(
         meals_rest=[MealSpec(time_of_day_minutes=180, carbs_mean=50, carbs_sd=5,
-                        absorption_hrs=3.0)],
-        carb_count_sigma=0.15,
+                        absorption_hrs=3.0, carb_count_sigma=meal_sigma)],
         carb_count_bias=0.0,
         absorption_sigma=0.15,
         undeclared_meal_prob=0.0,
