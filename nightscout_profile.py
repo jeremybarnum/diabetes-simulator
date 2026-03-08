@@ -742,15 +742,34 @@ def extract_bg_stats(entries: List[dict], tz: ZoneInfo) -> dict:
 # ─── Exercise Day Classification ─────────────────────────────────────────────
 
 def _classify_exercise_days(treatments: List[dict], tz: ZoneInfo) -> set:
-    """Identify dates with exercise from temporary overrides and exercise events.
+    """Identify dates with exercise from NS treatment data.
 
-    Exercise overrides: daytime (8-18h), insulin needs < 1.0, excluding
-    defensive overrides ("crashy", "refuse") and high-resistance ("horse show").
+    Handles two eras:
+
+    Loop era (Temporary Override events):
+      Exercise presets: "Workout" (ins ~0.7), "Riding" (ins ~0.8),
+        "50 Percent/Post Tennis" (ins=0.5)
+      JHT preset: "Just High Target" (target-only, ins=None) — counted as exercise
+      NOT exercise: "Crashy" (defensive), "A Little Off" (mild overnight),
+        "Very Quiet Work Day" (high resistance), "Horse Show" (ins > 1.2)
+
+    Trio era (Exercise events with notes):
+      Exercise presets: "Cardio", "JHT"
+      NOT exercise: "Slight off" (general sensitivity tweak)
     """
     exercise_dates = set()
 
+    # Loop-era exercise keywords (match against lowercased reason)
+    _LOOP_EXERCISE_KW = ["workout", "riding", "tennis", "cardio", "exercise"]
+    _LOOP_EXCLUDE_KW = ["crashy", "refuse", "a little off", "quiet work",
+                        "horse show"]
+
+    # Trio-era exercise preset names (match against lowercased notes)
+    _TRIO_EXERCISE_NOTES = {"cardio", "jht"}
+
     for t in treatments:
         if t.get("eventType") == "Temporary Override":
+            # Loop era
             created = t.get("created_at", "")
             if not created:
                 continue
@@ -763,20 +782,31 @@ def _classify_exercise_days(treatments: List[dict], tz: ZoneInfo) -> set:
             duration = t.get("duration", 0)
             insulin_needs = t.get("insulinNeedsScaleFactor")
 
-            is_exercise = False
-            if insulin_needs is not None and insulin_needs < 1.0 and 8 <= local.hour <= 18:
-                is_exercise = True
-            if any(kw in reason for kw in ["riding", "workout", "cardio", "exercise", "70%"]):
-                is_exercise = True
-            if "crashy" in reason or "refuse" in reason:
-                is_exercise = False
-            if insulin_needs is not None and insulin_needs > 1.2:
-                is_exercise = False
+            if duration <= 0:
+                continue
 
-            if is_exercise and duration > 0:
+            # Exclude first (takes priority)
+            if any(kw in reason for kw in _LOOP_EXCLUDE_KW):
+                continue
+            if insulin_needs is not None and insulin_needs > 1.2:
+                continue
+
+            # Include: explicit exercise keyword, or low insulin during daytime,
+            # or JHT started 11am-1pm (exercise-prep window)
+            is_exercise = False
+            if any(kw in reason for kw in _LOOP_EXERCISE_KW):
+                is_exercise = True
+            elif "just high target" in reason and 11 <= local.hour <= 13:
+                is_exercise = True
+            elif (insulin_needs is not None and insulin_needs < 1.0
+                  and 8 <= local.hour <= 18):
+                is_exercise = True
+
+            if is_exercise:
                 exercise_dates.add(local.date().isoformat())
 
         elif t.get("eventType") == "Exercise":
+            # Trio era
             created = t.get("created_at", "")
             if not created:
                 continue
@@ -785,8 +815,8 @@ def _classify_exercise_days(treatments: List[dict], tz: ZoneInfo) -> set:
             except (ValueError, AttributeError):
                 continue
             local = dt.astimezone(tz)
-            notes = (t.get("notes", "") or "").lower()
-            if any(kw in notes for kw in ["cardio", "workout", "riding"]):
+            notes = (t.get("notes", "") or "").strip().lower()
+            if notes in _TRIO_EXERCISE_NOTES:
                 exercise_dates.add(local.date().isoformat())
 
     return exercise_dates
