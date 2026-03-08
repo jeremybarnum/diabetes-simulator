@@ -43,6 +43,7 @@ class GlycemicMetrics:
     max_bg: float = 0.0
 
     hypo_events: int = 0          # BG < 70 for >= 15 min (3 consecutive readings)
+    hypo_events_concerning: int = 0  # subset meeting IOB + time-of-day criteria
 
     rescue_carb_events: int = 0
     rescue_carb_grams_total: float = 0.0
@@ -72,18 +73,22 @@ def _metrics_from_days(days) -> GlycemicMetrics:
     ta180 = float(np.sum(arr > 180) / n * 100)
     ta250 = float(np.sum(arr > 250) / n * 100)
 
-    # Count hypo events: consecutive runs of BG < 70 lasting >= 15 min (3 readings)
-    hypo_events = 0
-    consecutive_low = 0
-    for bg in bgs:
-        if bg < 70:
-            consecutive_low += 1
-        else:
-            if consecutive_low >= 3:
-                hypo_events += 1
-            consecutive_low = 0
-    if consecutive_low >= 3:
-        hypo_events += 1
+    # Hypo events from DayResult (tracked in sim loop with IOB context)
+    hypo_events = sum(d.hypo_events_total for d in days)
+    hypo_events_concerning = sum(d.hypo_events_concerning for d in days)
+
+    # Fallback: if no DayResult hypo counts (old data), use BG-based counting
+    if hypo_events == 0:
+        consecutive_low = 0
+        for bg in bgs:
+            if bg < 70:
+                consecutive_low += 1
+            else:
+                if consecutive_low >= 3:
+                    hypo_events += 1
+                consecutive_low = 0
+        if consecutive_low >= 3:
+            hypo_events += 1
 
     rescue_events = sum(d.rescue_carb_events for d in days)
     rescue_grams = sum(d.rescue_carb_grams_total for d in days)
@@ -101,6 +106,7 @@ def _metrics_from_days(days) -> GlycemicMetrics:
         min_bg=float(np.min(arr)),
         max_bg=float(np.max(arr)),
         hypo_events=hypo_events,
+        hypo_events_concerning=hypo_events_concerning,
         rescue_carb_events=rescue_events,
         rescue_carb_grams_total=rescue_grams,
         n_readings=n,
@@ -251,6 +257,12 @@ def _profile_from_dict(d: Dict) -> PatientProfile:
         rescue_cooldown_min=d.get('rescue_cooldown_min', 15.0),
         rescue_carbs_declared_pct=d.get('rescue_carbs_declared_pct',
                                           1.0 if d.get('rescue_carbs_declared') else 0.0),
+        hypo_bg_threshold=d.get('hypo_bg_threshold', 70.0),
+        hypo_min_duration_min=d.get('hypo_min_duration_min', 15.0),
+        hypo_iob_threshold=d.get('hypo_iob_threshold', 0.2),
+        hypo_overnight_start=d.get('hypo_overnight_start', 1),
+        hypo_overnight_end=d.get('hypo_overnight_end', 6),
+        hypo_ignore_overnight_no_iob=d.get('hypo_ignore_overnight_no_iob', True),
         algorithm_settings=d.get('algorithm_settings'),
     )
 
@@ -289,6 +301,12 @@ def _profile_to_dict(p: PatientProfile) -> Dict:
         'rescue_absorption_hrs': p.rescue_absorption_hrs,
         'rescue_cooldown_min': p.rescue_cooldown_min,
         'rescue_carbs_declared_pct': p.rescue_carbs_declared_pct,
+        'hypo_bg_threshold': p.hypo_bg_threshold,
+        'hypo_min_duration_min': p.hypo_min_duration_min,
+        'hypo_iob_threshold': p.hypo_iob_threshold,
+        'hypo_overnight_start': p.hypo_overnight_start,
+        'hypo_overnight_end': p.hypo_overnight_end,
+        'hypo_ignore_overnight_no_iob': p.hypo_ignore_overnight_no_iob,
         'algorithm_settings': p.get_settings(),
     }
 

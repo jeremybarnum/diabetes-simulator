@@ -90,6 +90,10 @@ def save_profile_to_json(file_path: str):
         "rescue_absorption_hrs": profile.rescue_absorption_hrs,
         "rescue_cooldown_min": profile.rescue_cooldown_min,
         "rescue_carbs_declared_pct": profile.rescue_carbs_declared_pct,
+        "hypo_bg_threshold": profile.hypo_bg_threshold,
+        "hypo_min_duration_min": profile.hypo_min_duration_min,
+        "hypo_iob_threshold": profile.hypo_iob_threshold,
+        "hypo_ignore_overnight_no_iob": profile.hypo_ignore_overnight_no_iob,
     }
     if profile.exercise_spec:
         ex = profile.exercise_spec
@@ -206,6 +210,12 @@ def load_profile_to_state(profile_path: str):
     st.session_state["sigmoid_isf_cb"] = False
     st.session_state["adj_factor_sigmoid_sl"] = 0.5
 
+    # Hypo classification
+    st.session_state["hypo_bg_threshold_sl"] = float(profile.hypo_bg_threshold)
+    st.session_state["hypo_min_duration_sl"] = float(profile.hypo_min_duration_min)
+    st.session_state["hypo_iob_threshold_sl"] = float(profile.hypo_iob_threshold)
+    st.session_state["hypo_ignore_overnight_cb"] = bool(profile.hypo_ignore_overnight_no_iob)
+
     # Rescue carbs
     st.session_state["rescue_enabled_cb"] = bool(profile.rescue_carbs_enabled)
     st.session_state["rescue_threshold_sl"] = float(profile.rescue_threshold)
@@ -297,6 +307,10 @@ def build_profile_from_state() -> PatientProfile:
         rescue_absorption_hrs=st.session_state.get("rescue_absorption_sl", 1.0),
         rescue_cooldown_min=st.session_state.get("rescue_cooldown_sl", 15.0),
         rescue_carbs_declared_pct=st.session_state.get("rescue_declared_pct_sl", 0) / 100.0,
+        hypo_bg_threshold=st.session_state.get("hypo_bg_threshold_sl", 70.0),
+        hypo_min_duration_min=st.session_state.get("hypo_min_duration_sl", 15.0),
+        hypo_iob_threshold=st.session_state.get("hypo_iob_threshold_sl", 0.2),
+        hypo_ignore_overnight_no_iob=st.session_state.get("hypo_ignore_overnight_cb", True),
         algorithm_settings=algo_settings,
     )
 
@@ -591,6 +605,7 @@ def compute_summary_stats(all_metrics):
         "CV (%)": f"{np.mean([m.cv for m in all_metrics]):.1f}",
         "GMI (%)": f"{np.mean([m.gmi for m in all_metrics]):.2f}",
         "Hypo events/week": f"{np.mean([m.hypo_events for m in all_metrics]):.2f}",
+        "Concerning hypos/week": f"{np.mean([m.hypo_events_concerning for m in all_metrics]):.2f}",
         "Rescue carb events/week": f"{np.mean([m.rescue_carb_events for m in all_metrics]):.1f}",
         "Rescue carbs (g)/week": f"{np.mean([m.rescue_carb_grams_total for m in all_metrics]):.0f}",
     }
@@ -829,6 +844,37 @@ with tab_patient:
 
     st.divider()
 
+    st.subheader("Hypo Classification")
+    st.caption("Defines what counts as a 'concerning' hypo — used for both sim and NS comparison.")
+    hc_col1, hc_col2 = st.columns(2)
+    with hc_col1:
+        st.slider(
+            "BG threshold (mg/dL)",
+            min_value=40, max_value=80, step=5,
+            key="hypo_bg_threshold_sl",
+            help="BG below this starts a hypo episode.",
+        )
+        st.slider(
+            "Min duration (min)",
+            min_value=5, max_value=30, step=5,
+            key="hypo_min_duration_sl",
+            help="Episode must last at least this long to count.",
+        )
+    with hc_col2:
+        st.slider(
+            "IOB threshold (U)",
+            min_value=0.0, max_value=1.0, step=0.05,
+            key="hypo_iob_threshold_sl",
+            help="IOB at onset ≥ this → always concerning (algorithm failure).",
+        )
+        st.checkbox(
+            "Ignore overnight no-IOB hypos",
+            key="hypo_ignore_overnight_cb",
+            help="Don't count hypos between 1-6am with low IOB as concerning.",
+        )
+
+    st.divider()
+
     st.subheader("Starting BG")
     st.slider(
         "Starting blood glucose (mg/dL)",
@@ -897,6 +943,10 @@ with tab_patient:
                 "rescue_absorption_hrs": profile.rescue_absorption_hrs,
                 "rescue_cooldown_min": profile.rescue_cooldown_min,
                 "rescue_carbs_declared_pct": profile.rescue_carbs_declared_pct,
+                "hypo_bg_threshold": profile.hypo_bg_threshold,
+                "hypo_min_duration_min": profile.hypo_min_duration_min,
+                "hypo_iob_threshold": profile.hypo_iob_threshold,
+                "hypo_ignore_overnight_no_iob": profile.hypo_ignore_overnight_no_iob,
             }
             if profile.exercise_spec:
                 ex = profile.exercise_spec
@@ -1434,12 +1484,17 @@ with tab_results:
             "Mean BG (mg/dL)", "SD BG (mg/dL)", "TIR 70-180 (%)",
             "Time <70 (%)", "Time <54 (%)", "Time >180 (%)",
             "Time >250 (%)", "CV (%)", "GMI (%)",
-            "Hypo events/wk", "Rescue events/wk", "Rescue carbs (g)/wk",
+            "Hypo events/wk", "Concerning hypos/wk",
+            "Rescue events/wk", "Rescue carbs (g)/wk",
         ]
         _ns_keys = ["mean_bg", "sd_bg", "tir", "time_below_70", "time_below_54",
                      "time_above_180", "time_above_250", None, "gmi",
-                     None, None, None]  # None = not available from NS
+                     "hypo_events_per_week", "hypo_concerning_per_week",
+                     "rescue_events_per_week", None]
         _ns_sig1_keys = {"time_below_70", "time_below_54", "time_above_180", "time_above_250"}
+
+        _ns_fmt2_keys = {"hypo_events_per_week", "hypo_concerning_per_week",
+                         "rescue_events_per_week"}
 
         def _ns_col(stats_dict):
             """Build a column of formatted values from an NS stats dict."""
@@ -1450,9 +1505,13 @@ with tab_results:
                 if key is None:
                     vals.append("—")
                 else:
-                    v = stats_dict.get(key, "?")
-                    if key in _ns_sig1_keys and isinstance(v, (int, float)):
+                    v = stats_dict.get(key)
+                    if v is None:
+                        vals.append("—")
+                    elif key in _ns_sig1_keys and isinstance(v, (int, float)):
                         vals.append(_fmt_sig1(v))
+                    elif key in _ns_fmt2_keys and isinstance(v, (int, float)):
+                        vals.append(f"{v:.2f}")
                     else:
                         vals.append(f"{v}")
             return vals
@@ -1472,6 +1531,7 @@ with tab_results:
                 f"{np.mean([m.cv for m in metrics_list]):.1f}",
                 f"{np.mean([m.gmi for m in metrics_list]):.2f}",
                 f"{np.mean([m.hypo_events for m in metrics_list]):.2f}",
+                f"{np.mean([m.hypo_events_concerning for m in metrics_list]):.2f}",
                 f"{np.mean([m.rescue_carb_events for m in metrics_list]):.1f}",
                 f"{np.mean([m.rescue_carb_grams_total for m in metrics_list]):.0f}",
             ]

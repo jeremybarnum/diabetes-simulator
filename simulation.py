@@ -93,6 +93,14 @@ class PatientProfile:
     rescue_cooldown_min: float = 15.0   # minutes between doses
     rescue_carbs_declared_pct: float = 0.0  # fraction of rescue carbs declared (0.0=none, 1.0=all)
 
+    # Hypo classification — defines what counts as a "concerning" hypo
+    hypo_bg_threshold: float = 70.0        # BG below this starts a hypo episode
+    hypo_min_duration_min: float = 15.0    # Episode must last at least this long
+    hypo_iob_threshold: float = 0.2        # IOB ≥ this at onset → concerning
+    hypo_overnight_start: int = 1          # Hour (24h) — overnight window start
+    hypo_overnight_end: int = 6            # Hour (24h) — overnight window end
+    hypo_ignore_overnight_no_iob: bool = True  # Skip overnight + low-IOB episodes
+
     # Algorithm settings (pump programming) — loaded from settings.json if None
     algorithm_settings: Optional[Dict] = None
 
@@ -162,6 +170,12 @@ class PatientProfile:
             rescue_cooldown_min=data.get('rescue_cooldown_min', 15.0),
             rescue_carbs_declared_pct=data.get('rescue_carbs_declared_pct',
                                               1.0 if data.get('rescue_carbs_declared') else 0.0),
+            hypo_bg_threshold=data.get('hypo_bg_threshold', 70.0),
+            hypo_min_duration_min=data.get('hypo_min_duration_min', 15.0),
+            hypo_iob_threshold=data.get('hypo_iob_threshold', 0.2),
+            hypo_overnight_start=data.get('hypo_overnight_start', 1),
+            hypo_overnight_end=data.get('hypo_overnight_end', 6),
+            hypo_ignore_overnight_no_iob=data.get('hypo_ignore_overnight_no_iob', True),
             algorithm_settings=settings,
         )
 
@@ -187,6 +201,8 @@ class DayResult:
     is_exercise_day: bool = False
     rescue_carb_events: int = 0
     rescue_carb_grams_total: float = 0.0
+    hypo_events_total: int = 0        # all episodes below threshold for ≥ duration
+    hypo_events_concerning: int = 0   # subset that meet IOB + time-of-day criteria
 
     def to_dict(self) -> Dict:
         return {
@@ -213,6 +229,8 @@ class DayResult:
             'is_exercise_day': self.is_exercise_day,
             'rescue_carb_events': self.rescue_carb_events,
             'rescue_carb_grams_total': self.rescue_carb_grams_total,
+            'hypo_events_total': self.hypo_events_total,
+            'hypo_events_concerning': self.hypo_events_concerning,
         }
 
     @classmethod
@@ -229,6 +247,8 @@ class DayResult:
             is_exercise_day=d.get('is_exercise_day', False),
             rescue_carb_events=d.get('rescue_carb_events', 0),
             rescue_carb_grams_total=d.get('rescue_carb_grams_total', 0.0),
+            hypo_events_total=d.get('hypo_events_total', 0),
+            hypo_events_concerning=d.get('hypo_events_concerning', 0),
         )
 
 
@@ -436,7 +456,7 @@ def get_trio_recommendation(
             'short_avgdelta': 0, 'long_avgdelta': 0, 'date': now_ms,
         }
 
-    return determine_basal(
+    result = determine_basal(
         glucose_status=glucose_status,
         currenttemp={'rate': 0, 'duration': 0},
         iob_data=iob_data,
@@ -446,6 +466,8 @@ def get_trio_recommendation(
         micro_bolus_allowed=True,
         clock_ms=now_ms,
     )
+    result['iob'] = iob_data.get('iob', 0.0)
+    return result
 
 
 # ─── Simulation Engine ───────────────────────────────────────────────────────
@@ -542,6 +564,12 @@ class SimulationRun:
 
         # Rescue carbs state
         last_rescue_time = -1e9
+
+        # Hypo episode tracking
+        hypo_consecutive_low = 0
+        hypo_onset_iob = 0.0
+        hypo_onset_time = 0.0
+        min_readings_for_hypo = max(1, int(self.profile.hypo_min_duration_min / 5))
 
         # Pruning cutoff: at 400 min, both insulin (DIA=370min) and carbs
         # (max ~4h absorption) are fully absorbed → delta is 0 → safe to prune.
@@ -647,6 +675,7 @@ class SimulationRun:
                 algo_settings = {**settings, 'basal_rate': effective_basal}
 
             l_bol, l_rate = 0.0, effective_basal
+            current_iob = 0.0
             try:
                 if self.algorithm_name == 'trio':
                     result = get_trio_recommendation(
@@ -657,6 +686,7 @@ class SimulationRun:
                     rate_val = result.get('rate')
                     l_rate = rate_val if rate_val is not None else effective_basal
                     l_bol = smb
+                    current_iob = result.get('iob', 0.0)
                 else:
                     output = get_loop_recommendation(
                         algo, bg, current_time, cgm_history,
@@ -665,9 +695,30 @@ class SimulationRun:
                     l_bol = output.bolus or 0.0
                     l_rate = (output.temp_basal_rate
                               if output.temp_basal_rate is not None else effective_basal)
+                    current_iob = output.iob
             except Exception:
                 # Algorithm failure — maintain effective basal
                 pass
+
+            # --- Track hypo episodes ---
+            if bg < self.profile.hypo_bg_threshold:
+                if hypo_consecutive_low == 0:
+                    # Episode onset — record IOB and time
+                    hypo_onset_iob = current_iob
+                    hypo_onset_time = current_time
+                hypo_consecutive_low += 1
+            else:
+                if hypo_consecutive_low >= min_readings_for_hypo:
+                    # Episode ended — classify
+                    day_results[-1].hypo_events_total += 1
+                    # Determine if concerning
+                    onset_hour = (7 + int((hypo_onset_time - sim_start) % 1440) // 60) % 24
+                    in_overnight = (self.profile.hypo_overnight_start
+                                    <= onset_hour < self.profile.hypo_overnight_end)
+                    has_iob = hypo_onset_iob >= self.profile.hypo_iob_threshold
+                    if has_iob or not in_overnight or not self.profile.hypo_ignore_overnight_no_iob:
+                        day_results[-1].hypo_events_concerning += 1
+                hypo_consecutive_low = 0
 
             # --- Apply dosing ---
             # Algorithm's temp adjustment is relative to effective_basal
@@ -693,6 +744,16 @@ class SimulationRun:
             basal_deficit_entries = [(t, u) for t, u in basal_deficit_entries if t >= prune_cutoff]
             actual_carbs = [(t, g, a) for t, g, a in actual_carbs if t >= prune_cutoff]
             declared_carbs = [(t, g, a) for t, g, a in declared_carbs if t >= prune_cutoff]
+
+        # Close any open hypo episode at end of sim
+        if hypo_consecutive_low >= min_readings_for_hypo and day_results:
+            day_results[-1].hypo_events_total += 1
+            onset_hour = (7 + int((hypo_onset_time - sim_start) % 1440) // 60) % 24
+            in_overnight = (self.profile.hypo_overnight_start
+                            <= onset_hour < self.profile.hypo_overnight_end)
+            has_iob = hypo_onset_iob >= self.profile.hypo_iob_threshold
+            if has_iob or not in_overnight or not self.profile.hypo_ignore_overnight_no_iob:
+                day_results[-1].hypo_events_concerning += 1
 
         return SimulationRunResult(
             algorithm_name=self.algorithm_name,

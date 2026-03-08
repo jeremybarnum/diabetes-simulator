@@ -31,6 +31,7 @@ from nightscout_query import (
     fetch_boluses,
     fetch_temp_basals,
     fetch_exercise,
+    fetch_devicestatus,
     compute_median_daily_trace,
 )
 from algorithms.openaps.iob import iob_total, find_insulin
@@ -865,6 +866,185 @@ def _split_entries_by_exercise(
     return exercise_entries, rest_entries
 
 
+# ─── Hypo & Rescue Detection ─────────────────────────────────────────────────
+
+def _count_hypo_episodes(
+    entries: List[dict],
+    devicestatus: List[dict],
+    exercise_dates: set,
+    tz,
+    hypo_bg_threshold: float = 70.0,
+    hypo_min_duration_min: float = 15.0,
+    hypo_iob_threshold: float = 0.2,
+    hypo_overnight_start: int = 1,
+    hypo_overnight_end: int = 6,
+    hypo_ignore_overnight_no_iob: bool = True,
+) -> dict:
+    """Count hypo episodes from CGM entries + IOB from devicestatus.
+
+    Returns dict with total/concerning counts for all/rest/exercise days.
+    """
+    # Sort entries by date
+    sorted_entries = sorted(
+        [e for e in entries if e.get("sgv") and e.get("date")],
+        key=lambda e: e["date"]
+    )
+
+    # Build IOB lookup (sorted by time for bisect)
+    iob_times = [d["date_ms"] for d in devicestatus]
+    iob_values = [d["iob"] for d in devicestatus]
+
+    def _nearest_iob(date_ms, tolerance_ms=5 * 60 * 1000):
+        """Find nearest IOB value within tolerance."""
+        if not iob_times:
+            return None
+        import bisect
+        idx = bisect.bisect_left(iob_times, date_ms)
+        best = None
+        best_diff = tolerance_ms + 1
+        for i in [idx - 1, idx]:
+            if 0 <= i < len(iob_times):
+                diff = abs(iob_times[i] - date_ms)
+                if diff < best_diff:
+                    best_diff = diff
+                    best = iob_values[i]
+        return best if best_diff <= tolerance_ms else None
+
+    min_readings = max(1, int(hypo_min_duration_min / 5))
+
+    # Track episodes
+    counts = {
+        "all": {"total": 0, "concerning": 0},
+        "rest": {"total": 0, "concerning": 0},
+        "exercise": {"total": 0, "concerning": 0},
+    }
+
+    consecutive_low = 0
+    onset_date_ms = 0
+    onset_iob = 0.0
+    onset_hour = 0
+    onset_day_str = ""
+
+    try:
+        tz_offset = timedelta(hours=tz.utcoffset(
+            datetime.now().replace(tzinfo=None)).total_seconds() / 3600)
+    except Exception:
+        tz_offset = timedelta(hours=-5)
+
+    def _classify_episode():
+        """Classify and count the current episode."""
+        is_exercise = onset_day_str in exercise_dates
+        day_type = "exercise" if is_exercise else "rest"
+        counts["all"]["total"] += 1
+        counts[day_type]["total"] += 1
+
+        in_overnight = hypo_overnight_start <= onset_hour < hypo_overnight_end
+        has_iob = onset_iob is not None and onset_iob >= hypo_iob_threshold
+        if has_iob or not in_overnight or not hypo_ignore_overnight_no_iob:
+            counts["all"]["concerning"] += 1
+            counts[day_type]["concerning"] += 1
+
+    for entry in sorted_entries:
+        sgv = entry["sgv"]
+        date_ms = entry["date"]
+
+        if sgv < hypo_bg_threshold:
+            if consecutive_low == 0:
+                onset_date_ms = date_ms
+                onset_iob = _nearest_iob(date_ms)
+                dt_utc = datetime.fromtimestamp(date_ms / 1000, tz=timezone.utc)
+                local = dt_utc + tz_offset
+                onset_hour = local.hour
+                onset_day_str = local.strftime("%Y-%m-%d")
+            consecutive_low += 1
+        else:
+            if consecutive_low >= min_readings:
+                _classify_episode()
+            consecutive_low = 0
+
+    # Close final episode
+    if consecutive_low >= min_readings:
+        _classify_episode()
+
+    return counts
+
+
+def _count_rescue_carbs(
+    treatments: List[dict],
+    entries: List[dict],
+    tz,
+) -> dict:
+    """Detect rescue carb events from NS treatments + CGM data.
+
+    A rescue carb is a small carb entry (< 15g) when BG is < 80 within ±10 min.
+    Excludes entries within 30 min of standard meal windows (7-9, 12-14, 18-20).
+
+    Returns dict with events count and avg grams.
+    """
+    # Build BG lookup sorted by time
+    bg_data = sorted(
+        [(e["date"], e["sgv"]) for e in entries
+         if e.get("sgv") and e.get("date") and e["sgv"] > 0],
+        key=lambda x: x[0]
+    )
+    bg_times = [t for t, _ in bg_data]
+    bg_values = [v for _, v in bg_data]
+
+    def _bg_near(date_ms, tolerance_ms=10 * 60 * 1000):
+        """Find minimum BG within tolerance window."""
+        import bisect
+        lo = bisect.bisect_left(bg_times, date_ms - tolerance_ms)
+        hi = bisect.bisect_right(bg_times, date_ms + tolerance_ms)
+        if lo >= hi:
+            return None
+        return min(bg_values[lo:hi])
+
+    # Meal windows (clock hours)
+    meal_windows = [(7, 9), (12, 14), (18, 20)]
+
+    try:
+        tz_offset = timedelta(hours=tz.utcoffset(
+            datetime.now().replace(tzinfo=None)).total_seconds() / 3600)
+    except Exception:
+        tz_offset = timedelta(hours=-5)
+
+    rescue_events = []
+    for t in treatments:
+        carbs = t.get("carbs")
+        if not carbs or carbs <= 0 or carbs >= 15:
+            continue
+        created = t.get("created_at", "")
+        if not created:
+            continue
+        try:
+            dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            continue
+
+        date_ms = int(dt.timestamp() * 1000)
+        local = dt + tz_offset
+        hour = local.hour + local.minute / 60.0
+
+        # Skip if near a meal window
+        near_meal = False
+        for start_h, end_h in meal_windows:
+            if start_h - 0.5 <= hour <= end_h + 0.5:
+                near_meal = True
+                break
+        if near_meal:
+            continue
+
+        # Check if BG is low near this carb entry
+        min_bg = _bg_near(date_ms)
+        if min_bg is not None and min_bg < 80:
+            rescue_events.append(carbs)
+
+    return {
+        "events": len(rescue_events),
+        "avg_grams": float(np.mean(rescue_events)) if rescue_events else 0.0,
+    }
+
+
 # ─── Step 5: Assemble Profile ────────────────────────────────────────────────
 
 def build_profile(
@@ -1007,6 +1187,29 @@ def build_profile(
           f"exercise={len(median_trace_exercise)} ({len(exercise_dates)} days), "
           f"rest={len(median_trace_rest)} pts")
 
+    # --- Hypo & rescue detection ---
+    print("\nFetching devicestatus for IOB timeline...")
+    try:
+        devicestatus = fetch_devicestatus(url, start_date, end_date, token=token)
+        print(f"  Got {len(devicestatus)} IOB readings")
+    except Exception as e:
+        print(f"  Failed to fetch devicestatus: {e}")
+        devicestatus = []
+
+    hypo_counts = _count_hypo_episodes(
+        cgm_entries, devicestatus, exercise_dates, tz,
+    )
+    weeks = max(1, days / 7)
+    print(f"\n  Hypo episodes (total/concerning):")
+    print(f"    All:      {hypo_counts['all']['total']}/{hypo_counts['all']['concerning']} "
+          f"({hypo_counts['all']['total']/weeks:.1f}/{hypo_counts['all']['concerning']/weeks:.1f} per week)")
+    print(f"    Rest:     {hypo_counts['rest']['total']}/{hypo_counts['rest']['concerning']}")
+    print(f"    Exercise: {hypo_counts['exercise']['total']}/{hypo_counts['exercise']['concerning']}")
+
+    rescue_data = _count_rescue_carbs(all_treatments, cgm_entries, tz)
+    print(f"\n  Rescue carbs detected: {rescue_data['events']} events "
+          f"({rescue_data['events']/weeks:.1f}/wk, avg {rescue_data['avg_grams']:.0f}g)")
+
     # --- Step 6: Insulin timeline (built but not included in profile) ---
     print("\nReconstructing insulin timeline...")
     # Use midpoint profile's basal schedule for gap-filling
@@ -1105,12 +1308,24 @@ def build_profile(
             "time_above_180": bg_stats["time_above_180"],
             "time_above_250": bg_stats["time_above_250"],
             "gmi": bg_stats.get("gmi", round(3.31 + 0.02392 * bg_stats["mean_bg"], 1)),
-            "stats_rest": bg_stats_rest,
-            "stats_exercise": bg_stats_exercise,
+            "stats_rest": {
+                **(bg_stats_rest or {}),
+                "hypo_events_per_week": hypo_counts["rest"]["total"] / weeks,
+                "hypo_concerning_per_week": hypo_counts["rest"]["concerning"] / weeks,
+            } if bg_stats_rest else None,
+            "stats_exercise": {
+                **(bg_stats_exercise or {}),
+                "hypo_events_per_week": hypo_counts["exercise"]["total"] / weeks,
+                "hypo_concerning_per_week": hypo_counts["exercise"]["concerning"] / weeks,
+            } if bg_stats_exercise else None,
             "median_trace": median_trace,
             "median_trace_exercise": median_trace_exercise,
             "median_trace_rest": median_trace_rest,
             "exercise_days": len(exercise_dates),
+            "hypo_events_per_week": hypo_counts["all"]["total"] / weeks,
+            "hypo_concerning_per_week": hypo_counts["all"]["concerning"] / weeks,
+            "rescue_events_per_week": rescue_data["events"] / weeks,
+            "rescue_avg_grams": rescue_data["avg_grams"],
         },
     }
 

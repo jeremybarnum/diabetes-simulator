@@ -435,6 +435,69 @@ def fetch_profile_history(
     return deduped
 
 
+def fetch_devicestatus(
+    base_url: str,
+    start_date: datetime,
+    end_date: datetime,
+    token: Optional[str] = None,
+    count: int = 50000,
+) -> List[Dict]:
+    """Fetch devicestatus entries from Nightscout for IOB timeline.
+
+    Returns list of dicts with 'date_ms' and 'iob' fields, sorted by date.
+    Extracts IOB from openaps.iob.iob (Trio) or loop.iob.iob (Loop).
+    """
+    url = f"{base_url}/api/v1/devicestatus.json"
+
+    params = {"count": count}
+    params["find[created_at][$gte]"] = start_date.strftime("%Y-%m-%dT%H:%M:%SZ")
+    params["find[created_at][$lte]"] = end_date.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    headers = {"Accept": "application/json"}
+    if token:
+        params["token"] = token
+
+    resp = requests.get(url, headers=headers, params=params, timeout=60)
+    resp.raise_for_status()
+    raw = resp.json()
+
+    result = []
+    for entry in raw:
+        date_ms = entry.get("mills")
+        if not date_ms:
+            created = entry.get("created_at", "")
+            if created:
+                try:
+                    dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+                    date_ms = int(dt.timestamp() * 1000)
+                except (ValueError, AttributeError):
+                    continue
+            else:
+                continue
+
+        # Try openaps.iob.iob (Trio/oref1) then loop.iob.iob (Loop)
+        iob = None
+        openaps = entry.get("openaps", {})
+        if openaps:
+            iob_data = openaps.get("iob", {})
+            if isinstance(iob_data, dict):
+                iob = iob_data.get("iob")
+            elif isinstance(iob_data, list) and iob_data:
+                iob = iob_data[0].get("iob")
+        if iob is None:
+            loop_data = entry.get("loop", {})
+            if loop_data:
+                iob_data = loop_data.get("iob", {})
+                if isinstance(iob_data, dict):
+                    iob = iob_data.get("iob")
+
+        if iob is not None:
+            result.append({"date_ms": date_ms, "iob": float(iob)})
+
+    result.sort(key=lambda x: x["date_ms"])
+    return result
+
+
 def fetch_boluses(
     base_url: str,
     start_date: datetime,
