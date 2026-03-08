@@ -81,7 +81,6 @@ def save_profile_to_json(file_path: str):
         "undeclared_meals_exercise": [_meal_to_dict(m) for m in profile.undeclared_meals_exercise],
         "carb_count_bias": profile.carb_count_bias,
         "absorption_sigma": profile.absorption_sigma,
-        "undeclared_meal_prob": profile.undeclared_meal_prob,
         "sensitivity_sigma": profile.sensitivity_sigma,
         "exercise_days": profile.exercise_days,
         "starting_bg": profile.starting_bg,
@@ -162,7 +161,6 @@ def load_profile_to_state(profile_path: str):
     # Patient model sliders — keys match the widget key= params
     st.session_state["carb_count_bias_sl"] = float(profile.carb_count_bias)
     st.session_state["absorption_sigma_sl"] = float(profile.absorption_sigma)
-    st.session_state["undeclared_meal_prob_sl"] = float(profile.undeclared_meal_prob)
     st.session_state["sensitivity_sigma_sl"] = float(profile.sensitivity_sigma)
     st.session_state["starting_bg_sl"] = int(profile.starting_bg)
 
@@ -287,7 +285,6 @@ def build_profile_from_state() -> PatientProfile:
         meals_exercise=meals_exercise,
         carb_count_bias=st.session_state.get("carb_count_bias_sl", 0.0),
         absorption_sigma=st.session_state.get("absorption_sigma_sl", 0.15),
-        undeclared_meal_prob=st.session_state.get("undeclared_meal_prob_sl", 0.0),
         undeclared_meals_rest=undeclared_meals_rest,
         undeclared_meals_exercise=undeclared_meals_exercise,
         sensitivity_sigma=st.session_state.get("sensitivity_sigma_sl", 0.15),
@@ -565,6 +562,16 @@ def plot_spaghetti(traces_by_algo, algo_colors, n_paths, n_days,
     return fig
 
 
+def _fmt_sig1(val):
+    """Format a value to 1 significant digit (e.g., 0.3, 0.04, 12)."""
+    if val == 0:
+        return "0"
+    from math import log10, floor
+    digits = -floor(log10(abs(val)))
+    decimals = max(0, digits)
+    return f"{val:.{decimals}f}"
+
+
 def compute_summary_stats(all_metrics):
     """Compute summary statistics from list of GlycemicMetrics."""
     if not all_metrics:
@@ -712,12 +719,6 @@ with tab_patient:
             key="carb_count_bias_sl",
         )
     st.caption("Per-meal carb counting error (σ) is set in the meal table's Count Error σ column.")
-    st.slider(
-        "Probability meal goes undeclared",
-        min_value=0.0, max_value=1.0, step=0.05,
-        help="Chance that any given meal is eaten but not bolused",
-        key="undeclared_meal_prob_sl",
-    )
 
     st.divider()
 
@@ -883,7 +884,6 @@ with tab_patient:
                 "undeclared_meals_exercise": [_meal_export(m) for m in profile.undeclared_meals_exercise],
                 "carb_count_bias": profile.carb_count_bias,
                 "absorption_sigma": profile.absorption_sigma,
-                "undeclared_meal_prob": profile.undeclared_meal_prob,
                 "sensitivity_sigma": profile.sensitivity_sigma,
                 "exercise_days": profile.exercise_days,
                 "starting_bg": profile.starting_bg,
@@ -1163,14 +1163,17 @@ with tab_ns:
             # Persist NS URL/token for future sessions
             _save_ns_config({"url": url, "token": token or ""})
 
-            st.success(f"Profile saved to **{filename}.json**")
+            st.success(f"Profile saved to **{filename}.json** — loading into simulator...")
 
             # Save standalone NS reference
             from nightscout_profile import save_ns_reference
             ref_path = str(ns_ref_dir / f"{filename}.json")
             save_ns_reference(profile_dict, ref_path)
-            st.info(f"NS reference trace saved to **ns_references/{filename}.json** — "
-                    f"select it from the sidebar to overlay on simulation results.")
+
+            # Auto-load the new profile into session state and rerun
+            load_profile_to_state(save_path)
+            st.session_state["loaded_profile"] = save_path
+            st.rerun()
 
             # Algorithm settings
             st.subheader("Extracted Algorithm Settings")
@@ -1275,8 +1278,8 @@ with tab_results:
             t_start = _time.time()
 
             def _eta_str(elapsed, frac):
-                if frac <= 0:
-                    return ""
+                if frac <= 0.05:
+                    return ""  # skip ETA until enough data to extrapolate
                 remaining = elapsed / frac * (1 - frac)
                 if remaining < 60:
                     return f"~{remaining:.0f}s left"
@@ -1435,6 +1438,7 @@ with tab_results:
         _ns_keys = ["mean_bg", "sd_bg", "tir", "time_below_70", "time_below_54",
                      "time_above_180", "time_above_250", None, "gmi",
                      None, None, None]  # None = not available from NS
+        _ns_sig1_keys = {"time_below_70", "time_below_54", "time_above_180", "time_above_250"}
 
         def _ns_col(stats_dict):
             """Build a column of formatted values from an NS stats dict."""
@@ -1446,7 +1450,10 @@ with tab_results:
                     vals.append("—")
                 else:
                     v = stats_dict.get(key, "?")
-                    vals.append(f"{v}")
+                    if key in _ns_sig1_keys and isinstance(v, (int, float)):
+                        vals.append(_fmt_sig1(v))
+                    else:
+                        vals.append(f"{v}")
             return vals
 
         def _sim_col(metrics_list):
@@ -1457,10 +1464,10 @@ with tab_results:
                 f"{np.mean([m.mean_bg for m in metrics_list]):.1f}",
                 f"{np.mean([m.sd_bg for m in metrics_list]):.1f}",
                 f"{np.mean([m.time_in_range for m in metrics_list]):.1f}",
-                f"{np.mean([m.time_below_70 for m in metrics_list]):.2f}",
-                f"{np.mean([m.time_below_54 for m in metrics_list]):.3f}",
-                f"{np.mean([m.time_above_180 for m in metrics_list]):.1f}",
-                f"{np.mean([m.time_above_250 for m in metrics_list]):.2f}",
+                _fmt_sig1(np.mean([m.time_below_70 for m in metrics_list])),
+                _fmt_sig1(np.mean([m.time_below_54 for m in metrics_list])),
+                _fmt_sig1(np.mean([m.time_above_180 for m in metrics_list])),
+                _fmt_sig1(np.mean([m.time_above_250 for m in metrics_list])),
                 f"{np.mean([m.cv for m in metrics_list]):.1f}",
                 f"{np.mean([m.gmi for m in metrics_list]):.2f}",
                 f"{np.mean([m.hypo_events for m in metrics_list]):.2f}",
@@ -1489,7 +1496,8 @@ with tab_results:
             _ns_ex = ref_stats.get('exercise_days', '?')
             _ns_ex_per_wk = f"{_ns_ex / _ns_days * 7:.1f}" if isinstance(_ns_ex, (int, float)) and isinstance(_ns_days, (int, float)) and _ns_days > 0 else "?"
             st.caption(f"NS Reference: {ref_stats.get('start_date', '?')} to {ref_stats.get('end_date', '?')} ({_ns_days} days, {_ns_ex_per_wk} exercise days/wk)")
-        st.dataframe(df, use_container_width=True)
+        # Height: ~35px per row + ~38px header; 12 rows → ~460px avoids inner scroll
+        st.dataframe(df, use_container_width=True, height=(len(metric_rows) + 1) * 35 + 3)
 
         # Head-to-head (if exactly 2 variants)
         if len(variant_labels) == 2:

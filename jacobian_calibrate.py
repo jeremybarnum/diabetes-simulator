@@ -40,8 +40,6 @@ def perturb(profile_dict, param_name, delta):
         p["sensitivity_sigma"] = max(0.01, p.get("sensitivity_sigma", 0.15) + delta)
     elif param_name == "absorption_sigma":
         p["absorption_sigma"] = max(0.01, p.get("absorption_sigma", 0.15) + delta)
-    elif param_name == "undeclared_meal_prob":
-        p["undeclared_meal_prob"] = max(0.0, min(1.0, p.get("undeclared_meal_prob", 0) + delta))
     elif param_name == "isf":
         p["algorithm_settings"]["insulin_sensitivity_factor"] += delta
     elif param_name == "basal_rate":
@@ -77,7 +75,6 @@ def main():
         ("carb_count_bias",     0.10),   # +0.1 bias
         ("sensitivity_sigma",   0.05),   # +0.05 sigma
         ("absorption_sigma",    0.05),   # +0.05 sigma
-        ("undeclared_meal_prob", 0.05),  # +5% undeclared probability
     ]
 
     print(f"Profile: {profile_path}")
@@ -172,8 +169,6 @@ def _get_current(profile, param_name):
         return profile.get("sensitivity_sigma", 0.15)
     elif param_name == "absorption_sigma":
         return profile.get("absorption_sigma", 0.15)
-    elif param_name == "undeclared_meal_prob":
-        return profile.get("undeclared_meal_prob", 0)
     elif param_name == "isf":
         return profile["algorithm_settings"]["insulin_sensitivity_factor"]
     elif param_name == "basal_rate":

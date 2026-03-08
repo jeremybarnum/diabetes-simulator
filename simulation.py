@@ -72,7 +72,6 @@ class PatientProfile:
     absorption_sigma: float = 0.15    # How well patient estimates absorption time
 
     # Undeclared meals
-    undeclared_meal_prob: float = 0.0  # Probability a meal goes completely undeclared
     undeclared_meals_rest: List[MealSpec] = field(default_factory=list)
     undeclared_meals_exercise: List[MealSpec] = field(default_factory=list)
 
@@ -150,7 +149,6 @@ class PatientProfile:
             meals_exercise=meals_exercise,
             carb_count_bias=data.get('carb_count_bias', 0.0),
             absorption_sigma=data.get('absorption_sigma', 0.15),
-            undeclared_meal_prob=data.get('undeclared_meal_prob', 0.0),
             undeclared_meals_rest=undeclared_meals_rest,
             undeclared_meals_exercise=undeclared_meals_exercise,
             sensitivity_sigma=data.get('sensitivity_sigma', 0.15),
@@ -705,9 +703,8 @@ class SimulationRun:
     def _generate_meals(self) -> List[MealEvent]:
         """Generate all meal events for the full simulation.
 
-        Each MealSpec has a `declared` flag and optional per-meal `carb_count_sigma`.
+        Each MealSpec has a `declared` flag and per-meal `carb_count_sigma`.
         Undeclared meal specs are also included (always undeclared).
-        The global `undeclared_meal_prob` can randomly make any declared meal undeclared.
 
         On exercise days, uses meals_exercise/undeclared_meals_exercise if non-empty,
         otherwise falls back to rest-day meals.
@@ -748,10 +745,7 @@ class SimulationRun:
                 # Declared absorption is deterministic (patient always declares the same)
                 declared_abs = spec.absorption_hrs
 
-                # Determine if undeclared: spec.declared=False, or random undeclared
                 is_undeclared = not spec.declared
-                if not is_undeclared and self.profile.undeclared_meal_prob > 0:
-                    is_undeclared = self.rng.random() < self.profile.undeclared_meal_prob
 
                 if is_undeclared:
                     meals.append(MealEvent(

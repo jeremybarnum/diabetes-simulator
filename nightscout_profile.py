@@ -999,7 +999,6 @@ def build_profile(
     l2_sensitivity_sigma = 0.15
     l2_carb_count_sigma = 0.15
     l2_carb_count_bias = 0.0
-    l2_undeclared_meal_prob = 0.0
     l2_undeclared_meals = []
 
     if layer2 and insulin_timeline and cgm_entries:
@@ -1052,7 +1051,6 @@ def build_profile(
         "meals_rest": meal_specs,
         "carb_count_bias": l2_carb_count_bias,
         "absorption_sigma": 0.15,
-        "undeclared_meal_prob": 0.0,
         "undeclared_meals_rest": [],
         "sensitivity_sigma": l2_sensitivity_sigma,
         "exercise_days": _pick_exercise_days(exercise_dates, exercises_per_week),
@@ -1109,14 +1107,11 @@ def build_profile(
         print(f"    sensitivity_sigma:    {l2_sensitivity_sigma}")
         print(f"    carb_count_sigma:     {l2_carb_count_sigma}")
         print(f"    carb_count_bias:      {l2_carb_count_bias}")
-        print(f"    undeclared_meal_prob: 0.0 (detection disabled)")
-        print(f"    undeclared_meals:     0 slots (detection disabled)")
     else:
         print(f"\n  Defaulted (Layer 2 skipped):")
         print(f"    carb_count_sigma: 0.15")
         print(f"    carb_count_bias:  0.0")
         print(f"    sensitivity_sigma: 0.15")
-        print(f"    undeclared_meal_prob: 0.0")
     print(f"\n  Reference BG stats (for calibration):")
     print(f"    Mean: {bg_stats['mean_bg']}, SD: {bg_stats['sd_bg']}, "
           f"TIR: {bg_stats['tir']}%, <70: {bg_stats['time_below_70']}%")
