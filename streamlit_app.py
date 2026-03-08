@@ -570,13 +570,10 @@ def plot_spaghetti(traces_by_algo, algo_colors, n_paths, n_days,
 
 
 def _fmt_sig1(val):
-    """Format a value to 1 significant digit (e.g., 0.3, 0.04, 12)."""
+    """Format a value to 1 decimal place (e.g., 0.3, 0.1, 12.0)."""
     if val == 0:
         return "0"
-    from math import log10, floor
-    digits = -floor(log10(abs(val)))
-    decimals = max(0, digits)
-    return f"{val:.{decimals}f}"
+    return f"{val:.1f}"
 
 
 def compute_summary_stats(all_metrics):
