@@ -301,6 +301,13 @@ def build_profile_from_state() -> PatientProfile:
     )
 
 
+# Handle deferred profile load from NS inference (must run before widgets are created)
+if "_pending_profile_load" in st.session_state:
+    _pending_path = st.session_state.pop("_pending_profile_load")
+    load_profile_to_state(_pending_path)
+    st.session_state["loaded_profile"] = _pending_path
+    st.toast(f"Loaded profile: {Path(_pending_path).stem}")
+
 # ─── Sidebar controls ───────────────────────────────────────────────────────
 
 st.sidebar.header("Simulation Settings")
@@ -1170,9 +1177,8 @@ with tab_ns:
             ref_path = str(ns_ref_dir / f"{filename}.json")
             save_ns_reference(profile_dict, ref_path)
 
-            # Auto-load the new profile into session state and rerun
-            load_profile_to_state(save_path)
-            st.session_state["loaded_profile"] = save_path
+            # Flag for top-of-page load on next rerun (can't set widget keys after instantiation)
+            st.session_state["_pending_profile_load"] = save_path
             st.rerun()
 
             # Algorithm settings
