@@ -1490,11 +1490,12 @@ with tab_results:
         _ns_keys = ["mean_bg", "sd_bg", "tir", "time_below_70", "time_below_54",
                      "time_above_180", "time_above_250", None, "gmi",
                      "hypo_events_per_week", "hypo_concerning_per_week",
-                     "rescue_events_per_week", None]
+                     "rescue_events_per_week", "rescue_carbs_per_week"]
         _ns_sig1_keys = {"time_below_70", "time_below_54", "time_above_180", "time_above_250"}
 
         _ns_fmt2_keys = {"hypo_events_per_week", "hypo_concerning_per_week",
                          "rescue_events_per_week"}
+        _ns_fmt0_keys = {"rescue_carbs_per_week"}
 
         def _ns_col(stats_dict):
             """Build a column of formatted values from an NS stats dict."""
@@ -1512,6 +1513,8 @@ with tab_results:
                         vals.append(_fmt_sig1(v))
                     elif key in _ns_fmt2_keys and isinstance(v, (int, float)):
                         vals.append(f"{v:.2f}")
+                    elif key in _ns_fmt0_keys and isinstance(v, (int, float)):
+                        vals.append(f"{v:.0f}")
                     else:
                         vals.append(f"{v}")
             return vals

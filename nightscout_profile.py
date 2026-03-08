@@ -1325,6 +1325,7 @@ def build_profile(
             "hypo_events_per_week": hypo_counts["all"]["total"] / weeks,
             "hypo_concerning_per_week": hypo_counts["all"]["concerning"] / weeks,
             "rescue_events_per_week": rescue_data["events"] / weeks,
+            "rescue_carbs_per_week": rescue_data["events"] / weeks * rescue_data["avg_grams"],
             "rescue_avg_grams": rescue_data["avg_grams"],
         },
     }

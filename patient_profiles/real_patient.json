@@ -120,6 +120,10 @@
     "rescue_absorption_hrs": 1.0,
     "rescue_cooldown_min": 15,
     "rescue_carbs_declared_pct": 0.5,
+    "hypo_bg_threshold": 70,
+    "hypo_min_duration_min": 15,
+    "hypo_iob_threshold": 0.0,
+    "hypo_ignore_overnight_no_iob": true,
     "exercise_spec": {
         "time_of_day_minutes": 330,
         "declared_scalar": 0.5,
@@ -138,7 +142,7 @@
         "suspend_threshold": 80.0,
         "max_basal_rate": 2.8,
         "max_bolus": 3.0,
-        "insulin_type": "rapid_acting_adult",
+        "insulin_type": "fiasp",
         "enable_irc": true,
         "enable_momentum": true,
         "enable_dca": true
