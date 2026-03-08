@@ -972,6 +972,7 @@ def _count_hypo_episodes(
 def _count_rescue_carbs(
     treatments: List[dict],
     entries: List[dict],
+    exercise_dates: set,
     tz,
 ) -> dict:
     """Detect rescue carb events from NS treatments + CGM data.
@@ -979,7 +980,7 @@ def _count_rescue_carbs(
     A rescue carb is a small carb entry (< 15g) when BG is < 80 within ±10 min.
     Excludes entries within 30 min of standard meal windows (7-9, 12-14, 18-20).
 
-    Returns dict with events count and avg grams.
+    Returns dict with all/rest/exercise counts and avg grams.
     """
     # Build BG lookup sorted by time
     bg_data = sorted(
@@ -1008,7 +1009,9 @@ def _count_rescue_carbs(
     except Exception:
         tz_offset = timedelta(hours=-5)
 
-    rescue_events = []
+    rescue_all = []
+    rescue_rest = []
+    rescue_exercise = []
     for t in treatments:
         carbs = t.get("carbs")
         if not carbs or carbs <= 0 or carbs >= 15:
@@ -1037,11 +1040,23 @@ def _count_rescue_carbs(
         # Check if BG is low near this carb entry
         min_bg = _bg_near(date_ms)
         if min_bg is not None and min_bg < 80:
-            rescue_events.append(carbs)
+            rescue_all.append(carbs)
+            day_str = local.strftime("%Y-%m-%d")
+            if day_str in exercise_dates:
+                rescue_exercise.append(carbs)
+            else:
+                rescue_rest.append(carbs)
+
+    def _rescue_stats(events):
+        return {
+            "events": len(events),
+            "avg_grams": float(np.mean(events)) if events else 0.0,
+        }
 
     return {
-        "events": len(rescue_events),
-        "avg_grams": float(np.mean(rescue_events)) if rescue_events else 0.0,
+        "all": _rescue_stats(rescue_all),
+        "rest": _rescue_stats(rescue_rest),
+        "exercise": _rescue_stats(rescue_exercise),
     }
 
 
@@ -1206,9 +1221,12 @@ def build_profile(
     print(f"    Rest:     {hypo_counts['rest']['total']}/{hypo_counts['rest']['concerning']}")
     print(f"    Exercise: {hypo_counts['exercise']['total']}/{hypo_counts['exercise']['concerning']}")
 
-    rescue_data = _count_rescue_carbs(all_treatments, cgm_entries, tz)
-    print(f"\n  Rescue carbs detected: {rescue_data['events']} events "
-          f"({rescue_data['events']/weeks:.1f}/wk, avg {rescue_data['avg_grams']:.0f}g)")
+    rescue_data = _count_rescue_carbs(all_treatments, cgm_entries, exercise_dates, tz)
+    print(f"\n  Rescue carbs detected:")
+    print(f"    All:      {rescue_data['all']['events']} events "
+          f"({rescue_data['all']['events']/weeks:.1f}/wk, avg {rescue_data['all']['avg_grams']:.0f}g)")
+    print(f"    Rest:     {rescue_data['rest']['events']} events")
+    print(f"    Exercise: {rescue_data['exercise']['events']} events")
 
     # --- Step 6: Insulin timeline (built but not included in profile) ---
     print("\nReconstructing insulin timeline...")
@@ -1312,11 +1330,15 @@ def build_profile(
                 **(bg_stats_rest or {}),
                 "hypo_events_per_week": hypo_counts["rest"]["total"] / weeks,
                 "hypo_concerning_per_week": hypo_counts["rest"]["concerning"] / weeks,
+                "rescue_events_per_week": rescue_data["rest"]["events"] / weeks,
+                "rescue_carbs_per_week": rescue_data["rest"]["events"] / weeks * rescue_data["rest"]["avg_grams"],
             } if bg_stats_rest else None,
             "stats_exercise": {
                 **(bg_stats_exercise or {}),
                 "hypo_events_per_week": hypo_counts["exercise"]["total"] / weeks,
                 "hypo_concerning_per_week": hypo_counts["exercise"]["concerning"] / weeks,
+                "rescue_events_per_week": rescue_data["exercise"]["events"] / weeks,
+                "rescue_carbs_per_week": rescue_data["exercise"]["events"] / weeks * rescue_data["exercise"]["avg_grams"],
             } if bg_stats_exercise else None,
             "median_trace": median_trace,
             "median_trace_exercise": median_trace_exercise,
@@ -1324,9 +1346,9 @@ def build_profile(
             "exercise_days": len(exercise_dates),
             "hypo_events_per_week": hypo_counts["all"]["total"] / weeks,
             "hypo_concerning_per_week": hypo_counts["all"]["concerning"] / weeks,
-            "rescue_events_per_week": rescue_data["events"] / weeks,
-            "rescue_carbs_per_week": rescue_data["events"] / weeks * rescue_data["avg_grams"],
-            "rescue_avg_grams": rescue_data["avg_grams"],
+            "rescue_events_per_week": rescue_data["all"]["events"] / weeks,
+            "rescue_carbs_per_week": rescue_data["all"]["events"] / weeks * rescue_data["all"]["avg_grams"],
+            "rescue_avg_grams": rescue_data["all"]["avg_grams"],
         },
     }
 
