@@ -42,6 +42,7 @@ class MealSpec:
     absorption_hrs: float = 3.0  # True mean absorption time (hours)
     declared: bool = True        # Whether patient declares this meal to the pump
     carb_count_sigma: float = 0.15  # Carb counting error (lognormal sigma)
+    carb_count_bias: float = None   # Per-meal bias override (None = use global)
 
 
 @dataclass
@@ -54,6 +55,7 @@ class ExerciseSpec:
     actual_scalar_sigma: float = 0.1  # Lognormal sigma for actual scalar
     actual_duration_hrs_mean: float = 7.0
     actual_duration_hrs_sigma: float = 0.15  # Lognormal sigma for duration
+    declared_lead_time_min: float = 60.0  # How long before actual exercise the patient sets temp target
 
 
 @dataclass
@@ -222,7 +224,8 @@ class DayResult:
                  'declared_scalar': e.declared_scalar,
                  'declared_duration_hrs': e.declared_duration_hrs,
                  'actual_scalar': e.actual_scalar,
-                 'actual_duration_hrs': e.actual_duration_hrs}
+                 'actual_duration_hrs': e.actual_duration_hrs,
+                 'actual_start_offset_min': e.actual_start_offset_min}
                 for e in self.exercises
             ],
             'sensitivity_trace': self.sensitivity_trace,
@@ -819,7 +822,7 @@ class SimulationRun:
                     ))
                 else:
                     sigma = spec.carb_count_sigma
-                    bias = global_bias
+                    bias = spec.carb_count_bias if spec.carb_count_bias is not None else global_bias
 
                     # Patient estimates carb count with bias + random error
                     if sigma > 0 or bias > 0:
@@ -878,6 +881,7 @@ class SimulationRun:
                     declared_duration_hrs=spec.declared_duration_hrs,
                     actual_scalar=actual_scalar,
                     actual_duration_hrs=actual_dur,
+                    actual_start_offset_min=getattr(spec, 'declared_lead_time_min', 60.0),
                 ))
         return events
 

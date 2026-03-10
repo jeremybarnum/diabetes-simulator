@@ -72,6 +72,8 @@ def save_profile_to_json(file_path: str):
              "absorption_hrs": m.absorption_hrs,
              "declared": m.declared}
         d["carb_count_sigma"] = m.carb_count_sigma
+        if m.carb_count_bias is not None:
+            d["carb_count_bias"] = m.carb_count_bias
         return d
 
     data = {
@@ -105,6 +107,7 @@ def save_profile_to_json(file_path: str):
             "actual_scalar_sigma": ex.actual_scalar_sigma,
             "actual_duration_hrs_mean": ex.actual_duration_hrs_mean,
             "actual_duration_hrs_sigma": ex.actual_duration_hrs_sigma,
+            "declared_lead_time_min": ex.declared_lead_time_min,
         }
     if profile.algorithm_settings:
         data["algorithm_settings"] = profile.algorithm_settings
@@ -133,7 +136,8 @@ def load_profile_to_state(profile_path: str):
     empty_meals_df = pd.DataFrame(
         {"Time": pd.Series(dtype=str), "Avg Carbs (g)": pd.Series(dtype=float),
          "SD (g)": pd.Series(dtype=float), "Absorption (hrs)": pd.Series(dtype=float),
-         "Declared": pd.Series(dtype=bool), "Count Error σ": pd.Series(dtype=float)}
+         "Declared": pd.Series(dtype=bool), "Count Error σ": pd.Series(dtype=float),
+         "Decl Bias": pd.Series(dtype=float)}
     )
 
     def _build_meals_df(declared_meals, undeclared_meals):
@@ -146,6 +150,7 @@ def load_profile_to_state(profile_path: str):
                 "Absorption (hrs)": float(m.absorption_hrs),
                 "Declared": m.declared,
                 "Count Error σ": float(m.carb_count_sigma),
+                "Decl Bias": float(m.carb_count_bias) if m.carb_count_bias is not None else None,
             })
         for m in undeclared_meals:
             rows.append({
@@ -155,6 +160,7 @@ def load_profile_to_state(profile_path: str):
                 "Absorption (hrs)": float(m.absorption_hrs),
                 "Declared": False,
                 "Count Error σ": float(m.carb_count_sigma),
+                "Decl Bias": None,
             })
         rows.sort(key=lambda r: r["Time"])
         return pd.DataFrame(rows) if rows else empty_meals_df.copy()
@@ -181,6 +187,7 @@ def load_profile_to_state(profile_path: str):
         st.session_state["ex_actual_scalar_sigma_sl"] = float(ex.actual_scalar_sigma)
         st.session_state["ex_actual_duration_mean_sl"] = float(ex.actual_duration_hrs_mean)
         st.session_state["ex_actual_duration_sigma_sl"] = float(ex.actual_duration_hrs_sigma)
+        st.session_state["ex_lead_time_sl"] = int(getattr(ex, 'declared_lead_time_min', 60))
     else:
         st.session_state["ex_time_in"] = "17:00"
         st.session_state["ex_declared_scalar_sl"] = 0.5
@@ -189,6 +196,7 @@ def load_profile_to_state(profile_path: str):
         st.session_state["ex_actual_scalar_sigma_sl"] = 0.1
         st.session_state["ex_actual_duration_mean_sl"] = 7.0
         st.session_state["ex_actual_duration_sigma_sl"] = 0.15
+        st.session_state["ex_lead_time_sl"] = 60
 
     # Algorithm settings — keys match widget key= params
     st.session_state["isf_in"] = float(settings.get("insulin_sensitivity_factor", 100.0))
@@ -240,6 +248,8 @@ def build_profile_from_state() -> PatientProfile:
                     is_declared = bool(row.get("Declared", True))
                     count_sigma_val = row.get("Count Error σ")
                     count_sigma = float(count_sigma_val) if pd.notna(count_sigma_val) else 0.15
+                    decl_bias_val = row.get("Decl Bias")
+                    decl_bias = float(decl_bias_val) if pd.notna(decl_bias_val) else None
                     spec = MealSpec(
                         time_of_day_minutes=t_min,
                         carbs_mean=float(row["Avg Carbs (g)"]),
@@ -247,6 +257,7 @@ def build_profile_from_state() -> PatientProfile:
                         absorption_hrs=float(row["Absorption (hrs)"]),
                         declared=is_declared,
                         carb_count_sigma=count_sigma,
+                        carb_count_bias=decl_bias,
                     )
                     if is_declared:
                         declared.append(spec)
@@ -272,6 +283,7 @@ def build_profile_from_state() -> PatientProfile:
             actual_scalar_sigma=st.session_state.get("ex_actual_scalar_sigma_sl", 0.1),
             actual_duration_hrs_mean=st.session_state.get("ex_actual_duration_mean_sl", 7.0),
             actual_duration_hrs_sigma=st.session_state.get("ex_actual_duration_sigma_sl", 0.15),
+            declared_lead_time_min=float(st.session_state.get("ex_lead_time_sl", 60)),
         )
 
     # Build algorithm settings dict
@@ -414,8 +426,20 @@ trace_day_filter = st.sidebar.radio(
 
 # ─── Helper functions ────────────────────────────────────────────────────────
 
+def _run_one_path_local(args):
+    """Run a single sim path. Top-level function for multiprocessing."""
+    path_seed, profile_dict, algorithm_name, n_days = args
+    from monte_carlo import _profile_from_dict
+    profile = _profile_from_dict(profile_dict)
+    rng = np.random.RandomState(path_seed)
+    sim = SimulationRun(profile=profile, algorithm_name=algorithm_name,
+                        n_days=n_days, rng=rng)
+    result = sim.run()
+    return result.to_dict()
+
+
 def run_paths(profile, algorithm_name, n_paths, n_days, seed, progress_cb=None, seed_label=None):
-    """Run n_paths simulations, return (traces_by_day, metrics_dict, exercise_flags).
+    """Run n_paths simulations in parallel, return (traces_by_day, metrics_dict, exercise_flags).
 
     traces_by_day: list of lists. Each path produces n_days day-traces.
     Each day-trace is [(hours_in_day, bg), ...].
@@ -424,19 +448,42 @@ def run_paths(profile, algorithm_name, n_paths, n_days, seed, progress_cb=None, 
     progress_cb: optional callback(completed_count) called after each path.
     seed_label: label used for seed offset (defaults to algorithm_name).
     """
+    import os
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+
     if seed_label is None:
         seed_label = algorithm_name
+
+    profile_dict = _profile_to_dict(profile)
+
+    path_args = []
+    for i in range(n_paths):
+        path_seed = seed + i * 1000 + _algo_seed_offset(seed_label)
+        path_args.append((path_seed, profile_dict, algorithm_name, n_days))
+
     all_day_traces = []
     all_exercise_flags = []
     all_metrics = []
     rest_metrics = []
     exercise_metrics = []
+
+    max_workers = os.cpu_count() or 4
+    completed = 0
+
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(_run_one_path_local, args): i
+                   for i, args in enumerate(path_args)}
+        # Collect in submission order for reproducibility
+        results_by_idx = {}
+        for future in as_completed(futures):
+            idx = futures[future]
+            results_by_idx[idx] = future.result()
+            completed += 1
+            if progress_cb:
+                progress_cb(completed)
+
     for i in range(n_paths):
-        path_seed = seed + i * 1000 + _algo_seed_offset(seed_label)
-        rng = np.random.RandomState(path_seed)
-        sim = SimulationRun(profile=profile, algorithm_name=algorithm_name,
-                            n_days=n_days, rng=rng)
-        result = sim.run()
+        result = SimulationRunResult.from_dict(results_by_idx[i])
         m_all, m_rest, m_exercise = compute_metrics_by_day_type(result)
         all_metrics.append(m_all)
         if m_rest is not None:
@@ -454,8 +501,6 @@ def run_paths(profile, algorithm_name, n_paths, n_days, seed, progress_cb=None, 
         all_day_traces.append(path_days)
         all_exercise_flags.append(path_flags)
 
-        if progress_cb:
-            progress_cb(i + 1)
     metrics_dict = {"all": all_metrics, "rest": rest_metrics, "exercise": exercise_metrics}
     return all_day_traces, metrics_dict, all_exercise_flags
 
@@ -678,7 +723,166 @@ with tab_patient:
         "Count Error σ": st.column_config.NumberColumn(
             "Count Error σ", min_value=0.0, max_value=1.0, step=0.05, default=0.15,
             help="Per-meal carb counting error sigma."),
+        "Decl Bias": st.column_config.NumberColumn(
+            "Decl Bias", min_value=-1.0, max_value=2.0, step=0.05, default=None,
+            help="Per-meal declaration bias. Positive = under-declare. "
+                 "Leave blank to use global bias."),
     }
+
+    st.divider()
+
+    # ─── Infer Meals from NS Trace ────────────────────────────────────────────
+    _infer_profile_path = st.session_state.get("loaded_profile", "")
+    _infer_ns_ref = None
+    if _infer_profile_path:
+        try:
+            with open(_infer_profile_path) as _f:
+                _infer_pdata = json.load(_f)
+            _infer_ns_ref = _infer_pdata.get("ns_reference_stats")
+        except Exception:
+            pass
+    # Also check standalone NS reference files
+    if not _infer_ns_ref:
+        for _ref_file in sorted(ns_ref_dir.glob("*.json")):
+            try:
+                with open(_ref_file) as _f:
+                    _infer_ns_ref = json.load(_f)
+                if _infer_ns_ref.get("median_trace_rest"):
+                    break
+            except Exception:
+                _infer_ns_ref = None
+
+    if _infer_ns_ref and (_infer_ns_ref.get("median_trace_rest") or _infer_ns_ref.get("median_trace")):
+        with st.expander("Infer Meals from NS Trace", expanded=False):
+            st.caption(
+                "Detect postprandial peaks in the Nightscout median BG trace "
+                "and infer meal times, carb amounts, and absorption rates. "
+                "Requires a canonical curves table (run `build_canonical_curves.py` first)."
+            )
+
+            _canonical_path = Path(__file__).parent / "canonical_curves.json"
+            if not _canonical_path.exists():
+                st.warning(
+                    "No `canonical_curves.json` found. Run "
+                    "`python3 build_canonical_curves.py` first to generate "
+                    "the lookup table (~8 min)."
+                )
+            else:
+                from infer_meals_from_trace import smooth_trace, detect_peaks
+                from build_canonical_curves import load_canonical_table, lookup_meal
+
+                _ct = load_canonical_table(str(_canonical_path))
+
+                _infer_col1, _infer_col2 = st.columns(2)
+                with _infer_col1:
+                    _infer_day_type = st.selectbox(
+                        "Day type", ["rest", "exercise"],
+                        key="infer_day_type",
+                    )
+                with _infer_col2:
+                    _infer_min_rise = st.slider(
+                        "Min rise (mg/dL)", 3.0, 20.0, 5.0, 1.0,
+                        key="infer_min_rise",
+                        help="Minimum BG rise to detect as a meal",
+                    )
+
+                _trace_key = {
+                    "rest": "median_trace_rest",
+                    "exercise": "median_trace_exercise",
+                }.get(_infer_day_type, "median_trace_rest")
+                _raw_trace = _infer_ns_ref.get(_trace_key) or _infer_ns_ref.get("median_trace", [])
+                _trace = sorted([(float(h), float(bg)) for h, bg in _raw_trace], key=lambda p: p[0])
+
+                if not _trace:
+                    st.info(f"No {_trace_key} data available.")
+                else:
+                    _smoothed = smooth_trace(_trace, window_min=15)
+                    _peaks = detect_peaks(_smoothed, min_rise=_infer_min_rise, min_gap_hours=1.5)
+
+                    # Plot trace with detected peaks
+                    _fig_infer, _ax_infer = plt.subplots(figsize=(12, 4))
+                    _th = [h for h, _ in _trace]
+                    _tb = [bg for _, bg in _trace]
+                    _sh = [h for h, _ in _smoothed]
+                    _sb = [bg for _, bg in _smoothed]
+                    _ax_infer.plot(_th, _tb, color="gray", alpha=0.5, linewidth=1, label="Raw")
+                    _ax_infer.plot(_sh, _sb, color="black", linewidth=1.5, label="Smoothed")
+
+                    for _pk in _peaks:
+                        _ax_infer.axvline(_pk["start_time"], color="green", alpha=0.5,
+                                          linestyle="--", linewidth=1)
+                        _ax_infer.plot(_pk["peak_time"], _pk["peak_bg"], "rv", markersize=8)
+                        _ax_infer.annotate(
+                            f"+{_pk['rise']:.0f}",
+                            xy=(_pk["peak_time"], _pk["peak_bg"]),
+                            xytext=(5, 5), textcoords="offset points",
+                            fontsize=8, color="red",
+                        )
+
+                    _ax_infer.set_xlabel("Hours from 7am")
+                    _ax_infer.set_ylabel("BG (mg/dL)")
+                    _ax_infer.set_title(f"NS Median Trace ({_infer_day_type} days) — {len(_peaks)} peaks detected")
+                    _ax_infer.legend(fontsize=8)
+                    _ax_infer.set_xlim(0, 24)
+                    st.pyplot(_fig_infer)
+                    plt.close(_fig_infer)
+
+                    if _peaks:
+                        # Look up meals from canonical table
+                        _table_isf = _ct["metadata"]["isf"]
+                        _table_cr = _ct["metadata"]["cr"]
+                        _actual_isf = st.session_state.get("isf_in", 100.0)
+                        _actual_cr = st.session_state.get("carb_ratio_in", 10.0)
+                        _isf_ratio = _actual_isf / _table_isf
+                        _cr_ratio = _actual_cr / _table_cr
+
+                        _inferred_rows = []
+                        for _pk in _peaks:
+                            _meal_time_min = int(round(_pk["start_time"] * 60))
+                            _result = lookup_meal(
+                                _pk["rise"], _pk["time_to_peak_min"],
+                                _ct, _isf_ratio, _cr_ratio,
+                            )
+                            if _result:
+                                _carbs, _abs_hrs, _canon_rise, _canon_ttp, _dist = _result
+                                _carbs_sd = max(1.0, round(_carbs * 0.3, 1))
+                                if _carbs <= 8:
+                                    _carbs_sd = max(0.5, round(_carbs * 0.15, 1))
+                                _sigma = 0.15
+                                if _carbs <= 8:
+                                    _sigma = 0.0
+                                elif _carbs <= 15:
+                                    _sigma = 0.1
+                                _inferred_rows.append({
+                                    "Time": _minutes_to_clock(_meal_time_min),
+                                    "Avg Carbs (g)": float(_carbs),
+                                    "SD (g)": float(_carbs_sd),
+                                    "Absorption (hrs)": float(_abs_hrs),
+                                    "Declared": True,
+                                    "Count Error σ": _sigma,
+                                    "Rise (mg/dL)": round(_pk["rise"], 0),
+                                    "TTP (min)": round(_pk["time_to_peak_min"], 0),
+                                })
+
+                        if _inferred_rows:
+                            _inf_df = pd.DataFrame(_inferred_rows)
+                            _total_carbs = sum(r["Avg Carbs (g)"] for r in _inferred_rows)
+                            st.caption(f"{len(_inferred_rows)} meals, {_total_carbs:.0f}g total daily carbs")
+                            st.dataframe(_inf_df, use_container_width=True, hide_index=True)
+
+                            _target_key = "meals_rest_df" if _infer_day_type == "rest" else "meals_exercise_df"
+                            if st.button(
+                                f"Apply to {_infer_day_type}-day meals",
+                                key=f"apply_inferred_{_infer_day_type}",
+                                help=f"Replace the current {_infer_day_type}-day meal table with these inferred meals",
+                            ):
+                                # Drop the diagnostic columns before applying
+                                _apply_df = _inf_df.drop(columns=["Rise (mg/dL)", "TTP (min)"], errors="ignore")
+                                st.session_state[_target_key] = _apply_df
+                                st.success(f"Applied {len(_inferred_rows)} inferred meals to {_infer_day_type}-day schedule.")
+                                st.rerun()
+                    else:
+                        st.info("No peaks detected. Try lowering the minimum rise threshold.")
 
     st.divider()
 
@@ -771,6 +975,13 @@ with tab_patient:
                 "Declared duration (hrs)",
                 min_value=1.0, max_value=8.0, step=0.5,
                 key="ex_declared_duration_sl",
+            )
+            st.slider(
+                "Declared lead time (min)",
+                min_value=0, max_value=120, step=15,
+                help="How long before actual exercise the patient sets the temp target. "
+                     "Lets BG rise as a cushion before exercise starts.",
+                key="ex_lead_time_sl",
             )
         with ex_col2:
             st.slider(
@@ -1165,12 +1376,6 @@ with tab_ns:
             key="ns_insulin_type",
             help="Determines the insulin activity curve used for deviation analysis"
         )
-        ns_meal_times_str = st.text_input(
-            "Meal times (clock hours)",
-            key="ns_meal_times",
-            placeholder="e.g. 8, 13, 19",
-            help="Comma-separated clock hours. Carb entries are bucketed to the nearest meal. Leave blank for auto-detect."
-        )
 
     import_button = st.button("Import from Nightscout", type="primary")
 
@@ -1194,19 +1399,11 @@ with tab_ns:
                               if ns_start_date else None)
                     _end = (datetime.combine(ns_end_date, datetime.min.time()).replace(tzinfo=_tz.utc)
                             if ns_end_date else None)
-                    _meal_times = None
-                    _mt_str = ns_meal_times_str or ""
-                    if _mt_str.strip():
-                        try:
-                            _meal_times = [float(h.strip()) for h in _mt_str.split(",")]
-                        except ValueError:
-                            st.warning(f"Could not parse meal times: '{_mt_str}'. Using auto-detect.")
                     with contextlib.redirect_stdout(log_buffer):
                         profile_dict = ns_build_profile(
                             url, days=ns_days, token=token, output_path=save_path,
                             start_date=_start, end_date=_end,
                             insulin_type=ns_insulin_type,
-                            meal_times=_meal_times,
                         )
                 except Exception as e:
                     st.error(f"Import failed: {e}")

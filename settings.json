@@ -1,9 +1,9 @@
 {
   "insulin_sensitivity_factor": 100.0,
-  "carb_ratio": 10.0,
+  "carb_ratio": 9.0,
   "basal_rate": 0.45,
   "duration_of_insulin_action": 6.0,
-  "target": 100.0,
+  "target": 110.0,
   "suspend_threshold": 80.0,
   "max_basal_rate": 2.8,
   "max_bolus": 3.0,

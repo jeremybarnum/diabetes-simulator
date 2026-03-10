@@ -1,0 +1,948 @@
+{
+  "metadata": {
+    "algorithm": "trio",
+    "starting_bg": 100.0,
+    "isf": 100.0,
+    "cr": 10.0,
+    "insulin_type": "fiasp",
+    "carb_grid": [
+      2,
+      3,
+      5,
+      8,
+      10,
+      12,
+      15,
+      18,
+      20,
+      25,
+      30,
+      35,
+      40
+    ],
+    "absorption_grid": [
+      0.5,
+      1.0,
+      1.5,
+      2.0,
+      2.5,
+      3.0,
+      3.5,
+      4.0,
+      5.0,
+      6.0
+    ]
+  },
+  "curves": [
+    {
+      "carbs": 2,
+      "absorption_hrs": 0.5,
+      "peak_rise": 17.8,
+      "time_to_peak": 40,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 2,
+      "absorption_hrs": 1.0,
+      "peak_rise": 14.8,
+      "time_to_peak": 60,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 2,
+      "absorption_hrs": 1.5,
+      "peak_rise": 12.16,
+      "time_to_peak": 80,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 2,
+      "absorption_hrs": 2.0,
+      "peak_rise": 10.22,
+      "time_to_peak": 100,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 2,
+      "absorption_hrs": 2.5,
+      "peak_rise": 8.26,
+      "time_to_peak": 115,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 2,
+      "absorption_hrs": 3.0,
+      "peak_rise": 7.85,
+      "time_to_peak": 135,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 2,
+      "absorption_hrs": 3.5,
+      "peak_rise": 6.8,
+      "time_to_peak": 145,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 2,
+      "absorption_hrs": 4.0,
+      "peak_rise": 7.32,
+      "time_to_peak": 175,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 2,
+      "absorption_hrs": 5.0,
+      "peak_rise": 6.77,
+      "time_to_peak": 185,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 2,
+      "absorption_hrs": 6.0,
+      "peak_rise": 5.92,
+      "time_to_peak": 195,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 3,
+      "absorption_hrs": 0.5,
+      "peak_rise": 26.97,
+      "time_to_peak": 40,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 3,
+      "absorption_hrs": 1.0,
+      "peak_rise": 22.5,
+      "time_to_peak": 60,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 3,
+      "absorption_hrs": 1.5,
+      "peak_rise": 18.23,
+      "time_to_peak": 80,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 3,
+      "absorption_hrs": 2.0,
+      "peak_rise": 14.48,
+      "time_to_peak": 95,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 3,
+      "absorption_hrs": 2.5,
+      "peak_rise": 11.59,
+      "time_to_peak": 115,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 3,
+      "absorption_hrs": 3.0,
+      "peak_rise": 9.45,
+      "time_to_peak": 135,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 3,
+      "absorption_hrs": 3.5,
+      "peak_rise": 8.93,
+      "time_to_peak": 150,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 3,
+      "absorption_hrs": 4.0,
+      "peak_rise": 9.35,
+      "time_to_peak": 165,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 3,
+      "absorption_hrs": 5.0,
+      "peak_rise": 8.9,
+      "time_to_peak": 195,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 3,
+      "absorption_hrs": 6.0,
+      "peak_rise": 9.06,
+      "time_to_peak": 210,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 5,
+      "absorption_hrs": 0.5,
+      "peak_rise": 44.56,
+      "time_to_peak": 40,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 5,
+      "absorption_hrs": 1.0,
+      "peak_rise": 36.38,
+      "time_to_peak": 60,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 5,
+      "absorption_hrs": 1.5,
+      "peak_rise": 28.7,
+      "time_to_peak": 80,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 5,
+      "absorption_hrs": 2.0,
+      "peak_rise": 22.84,
+      "time_to_peak": 95,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 5,
+      "absorption_hrs": 2.5,
+      "peak_rise": 18.86,
+      "time_to_peak": 115,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 5,
+      "absorption_hrs": 3.0,
+      "peak_rise": 15.96,
+      "time_to_peak": 135,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 5,
+      "absorption_hrs": 3.5,
+      "peak_rise": 14.06,
+      "time_to_peak": 155,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 5,
+      "absorption_hrs": 4.0,
+      "peak_rise": 12.24,
+      "time_to_peak": 175,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 5,
+      "absorption_hrs": 5.0,
+      "peak_rise": 13.3,
+      "time_to_peak": 200,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 5,
+      "absorption_hrs": 6.0,
+      "peak_rise": 14.03,
+      "time_to_peak": 215,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 8,
+      "absorption_hrs": 0.5,
+      "peak_rise": 70.94,
+      "time_to_peak": 40,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 8,
+      "absorption_hrs": 1.0,
+      "peak_rise": 57.45,
+      "time_to_peak": 60,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 8,
+      "absorption_hrs": 1.5,
+      "peak_rise": 44.11,
+      "time_to_peak": 75,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 8,
+      "absorption_hrs": 2.0,
+      "peak_rise": 34.13,
+      "time_to_peak": 95,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 8,
+      "absorption_hrs": 2.5,
+      "peak_rise": 26.87,
+      "time_to_peak": 115,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 8,
+      "absorption_hrs": 3.0,
+      "peak_rise": 22.52,
+      "time_to_peak": 140,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 8,
+      "absorption_hrs": 3.5,
+      "peak_rise": 20.1,
+      "time_to_peak": 160,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 8,
+      "absorption_hrs": 4.0,
+      "peak_rise": 17.72,
+      "time_to_peak": 180,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 8,
+      "absorption_hrs": 5.0,
+      "peak_rise": 18.46,
+      "time_to_peak": 215,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 8,
+      "absorption_hrs": 6.0,
+      "peak_rise": 19.84,
+      "time_to_peak": 235,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 10,
+      "absorption_hrs": 0.5,
+      "peak_rise": 88.67,
+      "time_to_peak": 40,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 10,
+      "absorption_hrs": 1.0,
+      "peak_rise": 71.34,
+      "time_to_peak": 60,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 10,
+      "absorption_hrs": 1.5,
+      "peak_rise": 54.76,
+      "time_to_peak": 75,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 10,
+      "absorption_hrs": 2.0,
+      "peak_rise": 42.29,
+      "time_to_peak": 95,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 10,
+      "absorption_hrs": 2.5,
+      "peak_rise": 32.45,
+      "time_to_peak": 110,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 10,
+      "absorption_hrs": 3.0,
+      "peak_rise": 27.4,
+      "time_to_peak": 135,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 10,
+      "absorption_hrs": 3.5,
+      "peak_rise": 24.54,
+      "time_to_peak": 160,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 10,
+      "absorption_hrs": 4.0,
+      "peak_rise": 22.74,
+      "time_to_peak": 180,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 10,
+      "absorption_hrs": 5.0,
+      "peak_rise": 21.1,
+      "time_to_peak": 220,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 10,
+      "absorption_hrs": 6.0,
+      "peak_rise": 19.52,
+      "time_to_peak": 245,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 12,
+      "absorption_hrs": 0.5,
+      "peak_rise": 106.5,
+      "time_to_peak": 40,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 12,
+      "absorption_hrs": 1.0,
+      "peak_rise": 85.41,
+      "time_to_peak": 60,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 12,
+      "absorption_hrs": 1.5,
+      "peak_rise": 65.46,
+      "time_to_peak": 80,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 12,
+      "absorption_hrs": 2.0,
+      "peak_rise": 49.34,
+      "time_to_peak": 95,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 12,
+      "absorption_hrs": 2.5,
+      "peak_rise": 38.61,
+      "time_to_peak": 115,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 12,
+      "absorption_hrs": 3.0,
+      "peak_rise": 31.01,
+      "time_to_peak": 135,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 12,
+      "absorption_hrs": 3.5,
+      "peak_rise": 27.13,
+      "time_to_peak": 160,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 12,
+      "absorption_hrs": 4.0,
+      "peak_rise": 23.16,
+      "time_to_peak": 185,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 12,
+      "absorption_hrs": 5.0,
+      "peak_rise": 21.52,
+      "time_to_peak": 230,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 12,
+      "absorption_hrs": 6.0,
+      "peak_rise": 23.98,
+      "time_to_peak": 250,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 15,
+      "absorption_hrs": 0.5,
+      "peak_rise": 133.26,
+      "time_to_peak": 40,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 15,
+      "absorption_hrs": 1.0,
+      "peak_rise": 106.67,
+      "time_to_peak": 60,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 15,
+      "absorption_hrs": 1.5,
+      "peak_rise": 82.05,
+      "time_to_peak": 80,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 15,
+      "absorption_hrs": 2.0,
+      "peak_rise": 61.09,
+      "time_to_peak": 95,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 15,
+      "absorption_hrs": 2.5,
+      "peak_rise": 46.28,
+      "time_to_peak": 115,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 15,
+      "absorption_hrs": 3.0,
+      "peak_rise": 38.21,
+      "time_to_peak": 135,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 15,
+      "absorption_hrs": 3.5,
+      "peak_rise": 33.85,
+      "time_to_peak": 160,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 15,
+      "absorption_hrs": 4.0,
+      "peak_rise": 24.51,
+      "time_to_peak": 190,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 15,
+      "absorption_hrs": 5.0,
+      "peak_rise": 25.72,
+      "time_to_peak": 230,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 15,
+      "absorption_hrs": 6.0,
+      "peak_rise": 28.91,
+      "time_to_peak": 250,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 18,
+      "absorption_hrs": 0.5,
+      "peak_rise": 160.1,
+      "time_to_peak": 40,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 18,
+      "absorption_hrs": 1.0,
+      "peak_rise": 128.35,
+      "time_to_peak": 60,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 18,
+      "absorption_hrs": 1.5,
+      "peak_rise": 98.75,
+      "time_to_peak": 80,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 18,
+      "absorption_hrs": 2.0,
+      "peak_rise": 74.19,
+      "time_to_peak": 95,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 18,
+      "absorption_hrs": 2.5,
+      "peak_rise": 54.53,
+      "time_to_peak": 115,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 18,
+      "absorption_hrs": 3.0,
+      "peak_rise": 42.84,
+      "time_to_peak": 140,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 18,
+      "absorption_hrs": 3.5,
+      "peak_rise": 37.7,
+      "time_to_peak": 160,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 18,
+      "absorption_hrs": 4.0,
+      "peak_rise": 30.1,
+      "time_to_peak": 185,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 18,
+      "absorption_hrs": 5.0,
+      "peak_rise": 31.41,
+      "time_to_peak": 225,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 18,
+      "absorption_hrs": 6.0,
+      "peak_rise": 32.96,
+      "time_to_peak": 255,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 20,
+      "absorption_hrs": 0.5,
+      "peak_rise": 178.0,
+      "time_to_peak": 40,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 20,
+      "absorption_hrs": 1.0,
+      "peak_rise": 142.43,
+      "time_to_peak": 60,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 20,
+      "absorption_hrs": 1.5,
+      "peak_rise": 109.55,
+      "time_to_peak": 80,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 20,
+      "absorption_hrs": 2.0,
+      "peak_rise": 82.35,
+      "time_to_peak": 95,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 20,
+      "absorption_hrs": 2.5,
+      "peak_rise": 61.22,
+      "time_to_peak": 115,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 20,
+      "absorption_hrs": 3.0,
+      "peak_rise": 45.64,
+      "time_to_peak": 140,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 20,
+      "absorption_hrs": 3.5,
+      "peak_rise": 37.83,
+      "time_to_peak": 165,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 20,
+      "absorption_hrs": 4.0,
+      "peak_rise": 33.64,
+      "time_to_peak": 190,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 20,
+      "absorption_hrs": 5.0,
+      "peak_rise": 33.88,
+      "time_to_peak": 230,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 20,
+      "absorption_hrs": 6.0,
+      "peak_rise": 33.3,
+      "time_to_peak": 260,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 25,
+      "absorption_hrs": 0.5,
+      "peak_rise": 222.35,
+      "time_to_peak": 40,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 25,
+      "absorption_hrs": 1.0,
+      "peak_rise": 179.03,
+      "time_to_peak": 60,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 25,
+      "absorption_hrs": 1.5,
+      "peak_rise": 137.82,
+      "time_to_peak": 80,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 25,
+      "absorption_hrs": 2.0,
+      "peak_rise": 101.47,
+      "time_to_peak": 95,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 25,
+      "absorption_hrs": 2.5,
+      "peak_rise": 74.36,
+      "time_to_peak": 115,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 25,
+      "absorption_hrs": 3.0,
+      "peak_rise": 53.94,
+      "time_to_peak": 140,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 25,
+      "absorption_hrs": 3.5,
+      "peak_rise": 40.88,
+      "time_to_peak": 170,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 25,
+      "absorption_hrs": 4.0,
+      "peak_rise": 36.68,
+      "time_to_peak": 195,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 25,
+      "absorption_hrs": 5.0,
+      "peak_rise": 38.97,
+      "time_to_peak": 235,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 25,
+      "absorption_hrs": 6.0,
+      "peak_rise": 37.53,
+      "time_to_peak": 280,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 30,
+      "absorption_hrs": 0.5,
+      "peak_rise": 266.74,
+      "time_to_peak": 40,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 30,
+      "absorption_hrs": 1.0,
+      "peak_rise": 214.65,
+      "time_to_peak": 60,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 30,
+      "absorption_hrs": 1.5,
+      "peak_rise": 164.51,
+      "time_to_peak": 80,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 30,
+      "absorption_hrs": 2.0,
+      "peak_rise": 121.59,
+      "time_to_peak": 100,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 30,
+      "absorption_hrs": 2.5,
+      "peak_rise": 88.24,
+      "time_to_peak": 120,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 30,
+      "absorption_hrs": 3.0,
+      "peak_rise": 62.19,
+      "time_to_peak": 145,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 30,
+      "absorption_hrs": 3.5,
+      "peak_rise": 46.46,
+      "time_to_peak": 175,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 30,
+      "absorption_hrs": 4.0,
+      "peak_rise": 40.56,
+      "time_to_peak": 200,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 30,
+      "absorption_hrs": 5.0,
+      "peak_rise": 44.22,
+      "time_to_peak": 240,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 30,
+      "absorption_hrs": 6.0,
+      "peak_rise": 36.17,
+      "time_to_peak": 290,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 35,
+      "absorption_hrs": 0.5,
+      "peak_rise": 311.93,
+      "time_to_peak": 40,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 35,
+      "absorption_hrs": 1.0,
+      "peak_rise": 251.1,
+      "time_to_peak": 60,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 35,
+      "absorption_hrs": 1.5,
+      "peak_rise": 193.41,
+      "time_to_peak": 80,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 35,
+      "absorption_hrs": 2.0,
+      "peak_rise": 141.8,
+      "time_to_peak": 95,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 35,
+      "absorption_hrs": 2.5,
+      "peak_rise": 103.11,
+      "time_to_peak": 120,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 35,
+      "absorption_hrs": 3.0,
+      "peak_rise": 72.95,
+      "time_to_peak": 145,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 35,
+      "absorption_hrs": 3.5,
+      "peak_rise": 50.82,
+      "time_to_peak": 175,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 35,
+      "absorption_hrs": 4.0,
+      "peak_rise": 44.5,
+      "time_to_peak": 205,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 35,
+      "absorption_hrs": 5.0,
+      "peak_rise": 48.54,
+      "time_to_peak": 240,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 35,
+      "absorption_hrs": 6.0,
+      "peak_rise": 41.12,
+      "time_to_peak": 300,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 40,
+      "absorption_hrs": 0.5,
+      "peak_rise": 356.35,
+      "time_to_peak": 40,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 40,
+      "absorption_hrs": 1.0,
+      "peak_rise": 286.94,
+      "time_to_peak": 60,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 40,
+      "absorption_hrs": 1.5,
+      "peak_rise": 219.28,
+      "time_to_peak": 80,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 40,
+      "absorption_hrs": 2.0,
+      "peak_rise": 160.82,
+      "time_to_peak": 100,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 40,
+      "absorption_hrs": 2.5,
+      "peak_rise": 115.63,
+      "time_to_peak": 120,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 40,
+      "absorption_hrs": 3.0,
+      "peak_rise": 81.41,
+      "time_to_peak": 145,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 40,
+      "absorption_hrs": 3.5,
+      "peak_rise": 56.63,
+      "time_to_peak": 180,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 40,
+      "absorption_hrs": 4.0,
+      "peak_rise": 48.41,
+      "time_to_peak": 205,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 40,
+      "absorption_hrs": 5.0,
+      "peak_rise": 53.2,
+      "time_to_peak": 250,
+      "pre_meal_bg": 100.0
+    },
+    {
+      "carbs": 40,
+      "absorption_hrs": 6.0,
+      "peak_rise": 44.87,
+      "time_to_peak": 300,
+      "pre_meal_bg": 100.0
+    }
+  ]
+}

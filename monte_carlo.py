@@ -270,9 +270,17 @@ def _profile_from_dict(d: Dict) -> PatientProfile:
 def _profile_to_dict(p: PatientProfile) -> Dict:
     """Serialize PatientProfile to a picklable dict."""
     def _meal_list(specs):
-        return [{'time_of_day_minutes': m.time_of_day_minutes,
+        d_list = []
+        for m in specs:
+            d = {'time_of_day_minutes': m.time_of_day_minutes,
                  'carbs_mean': m.carbs_mean, 'carbs_sd': m.carbs_sd,
-                 'absorption_hrs': m.absorption_hrs} for m in specs]
+                 'absorption_hrs': m.absorption_hrs,
+                 'declared': m.declared,
+                 'carb_count_sigma': m.carb_count_sigma}
+            if m.carb_count_bias is not None:
+                d['carb_count_bias'] = m.carb_count_bias
+            d_list.append(d)
+        return d_list
     ex = None
     if p.exercise_spec:
         ex = {
@@ -283,6 +291,7 @@ def _profile_to_dict(p: PatientProfile) -> Dict:
             'actual_scalar_sigma': p.exercise_spec.actual_scalar_sigma,
             'actual_duration_hrs_mean': p.exercise_spec.actual_duration_hrs_mean,
             'actual_duration_hrs_sigma': p.exercise_spec.actual_duration_hrs_sigma,
+            'declared_lead_time_min': p.exercise_spec.declared_lead_time_min,
         }
     return {
         'meals_rest': _meal_list(p.meals_rest),

@@ -73,8 +73,13 @@ class ExerciseEvent:
 
     The patient declares a temp target to the algorithm, but the actual
     physiological effect may differ in magnitude and duration.
+
+    start_time_minutes is when the *declaration* (temp target) begins.
+    Actual physiological exercise starts after actual_start_offset_min.
+    Typical pattern: patient sets temp target ~60min before exercising
+    to let BG rise as a cushion.
     """
-    start_time_minutes: float  # When exercise starts (minutes from sim start)
+    start_time_minutes: float  # When temp target is set (minutes from sim start)
 
     # What the patient tells the algorithm
     declared_scalar: float = 0.5       # e.g., 50% sensitivity increase
@@ -84,18 +89,23 @@ class ExerciseEvent:
     actual_scalar: float = 0.5
     actual_duration_hrs: float = 7.0
 
+    # Offset: actual exercise starts this many minutes after declaration
+    actual_start_offset_min: float = 60.0
+
     def get_actual_effect(self, t_minutes: float) -> float:
         """
         Get the exercise sensitivity multiplier at time t.
 
         Returns a scalar < 1 meaning more sensitive (needs less insulin).
         Decays exponentially from actual_scalar back to 1.0 over actual_duration.
+        Actual effect starts at start_time_minutes + actual_start_offset_min.
 
         Returns:
             Multiplier on sensitivity (e.g., 0.5 = twice as sensitive).
             Returns 1.0 if exercise hasn't started or effect has fully decayed.
         """
-        elapsed = t_minutes - self.start_time_minutes
+        actual_start = self.start_time_minutes + self.actual_start_offset_min
+        elapsed = t_minutes - actual_start
         if elapsed < 0:
             return 1.0
 
