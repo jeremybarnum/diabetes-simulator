@@ -600,6 +600,17 @@ class SimulationRun:
                     is_exercise_day=len(day_exercises) > 0,
                 ))
 
+            # --- Determine exercise override scalar (affects basal, CR, ISF) ---
+            exercise_scalar = 1.0
+            for ex in exercise_events:
+                if ex.is_declared_active(current_time):
+                    exercise_scalar = ex.declared_scalar
+                    break
+
+            # Effective basal, CR, ISF during exercise override
+            effective_basal = basal_rate * exercise_scalar
+            effective_cr = settings['carb_ratio'] / exercise_scalar if exercise_scalar > 0 else settings['carb_ratio']
+
             # --- Check for meals at this step ---
             for meal in all_meals:
                 if abs(current_time - meal.time_minutes) < 0.1:
@@ -617,7 +628,8 @@ class SimulationRun:
                             meal.declared_carbs,
                             meal.declared_absorption_hrs,
                         ))
-                        bolus_units = meal.declared_carbs / settings['carb_ratio']
+                        # Bolus uses effective CR (override-adjusted)
+                        bolus_units = meal.declared_carbs / effective_cr
                         if bolus_units > 0:
                             bolus_history.append((current_time, bolus_units))
                     # If undeclared: patient eats but doesn't tell pump, no bolus
@@ -631,13 +643,6 @@ class SimulationRun:
             if abs(s_now - 1.0) > 1e-6:
                 deficit_units = basal_rate * (1.0 - s_now) * 5.0 / 60.0
                 basal_deficit_entries.append((current_time, deficit_units))
-
-            # --- Determine effective basal (exercise reduces delivery) ---
-            effective_basal = basal_rate
-            for ex in exercise_events:
-                if ex.is_declared_active(current_time):
-                    effective_basal = basal_rate * ex.declared_scalar
-                    break
 
             # Record basal reduction as negative bolus so both patient model
             # and algorithm see less insulin delivered during exercise
@@ -672,10 +677,14 @@ class SimulationRun:
             cgm_history.append((current_time, bg))
 
             # --- Get algorithm recommendation ---
-            # Algorithm sees the effective (exercise-adjusted) basal rate
+            # Algorithm sees exercise-adjusted basal, CR, and ISF
             algo_settings = settings
-            if effective_basal != basal_rate:
-                algo_settings = {**settings, 'basal_rate': effective_basal}
+            if exercise_scalar != 1.0:
+                effective_isf = settings['insulin_sensitivity_factor'] / exercise_scalar
+                algo_settings = {**settings,
+                                 'basal_rate': effective_basal,
+                                 'carb_ratio': effective_cr,
+                                 'insulin_sensitivity_factor': effective_isf}
 
             l_bol, l_rate = 0.0, effective_basal
             current_iob = 0.0
