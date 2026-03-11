@@ -1525,9 +1525,25 @@ with tab_results:
             progress = st.progress(0, text=f"Starting {variant_summary} — {total_work}...")
             t_start = _time.time()
 
+            _recent_times = []
+
             def _eta_str(elapsed, frac):
                 if frac <= 0.05:
-                    return ""  # skip ETA until enough data to extrapolate
+                    return ""
+                _recent_times.append((elapsed, frac))
+                # Use recent rate (last 5 updates) instead of overall average
+                # to avoid slow-start bias from cloud cold starts
+                window = _recent_times[-5:]
+                if len(window) >= 2:
+                    dt = window[-1][0] - window[0][0]
+                    df = window[-1][1] - window[0][1]
+                    if df > 0.01:
+                        rate = dt / df  # seconds per unit of progress
+                        remaining = rate * (1 - frac)
+                        if remaining < 60:
+                            return f"~{remaining:.0f}s left"
+                        return f"~{remaining / 60:.1f}m left"
+                # Fallback to overall average
                 remaining = elapsed / frac * (1 - frac)
                 if remaining < 60:
                     return f"~{remaining:.0f}s left"
